@@ -58,6 +58,26 @@ async function main() {
   page.drawText('Hello PDF', { x: 100, y: 700, size: 24, font });
   const pdfBytes = await pdfDoc.save();
   await writeFile(join(readers, 'sample.pdf'), pdfBytes);
+  // 使用 docx npm 包生成 .docx（devDependency）
+  const { Document, Packer, Paragraph, HeadingLevel, Table, TableRow, TableCell } = await import('docx');
+  const doc = new Document({
+    sections: [{
+      children: [
+        new Paragraph({ text: 'Top Heading', heading: HeadingLevel.HEADING_1 }),
+        new Paragraph({ text: 'This is body paragraph one.' }),
+        new Paragraph({ text: 'Sub Heading', heading: HeadingLevel.HEADING_2 }),
+        new Paragraph({ text: 'More body text here.' }),
+        new Table({
+          rows: [
+            new TableRow({ children: [new TableCell({ children: [new Paragraph('A')] }), new TableCell({ children: [new Paragraph('B')] })] }),
+            new TableRow({ children: [new TableCell({ children: [new Paragraph('C')] }), new TableCell({ children: [new Paragraph('D')] })] }),
+          ],
+        }),
+      ],
+    }],
+  });
+  const buf = await Packer.toBuffer(doc);
+  await writeFile(join(readers, 'sample.docx'), buf);
 
   console.log(`fixtures written under ${ROOT}`);
 }

@@ -1,5 +1,6 @@
 use ai_stack_lib::readers::markdown::extract;
 use ai_stack_lib::readers::pdf::extract as pdf_extract;
+use ai_stack_lib::readers::docx::extract as docx_extract;
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> PathBuf {
@@ -35,4 +36,17 @@ fn pdf_returns_pages_or_falls_back() {
             // 也可接受：失败时不 panic
         }
     }
+}
+
+#[test]
+fn docx_extracts_headings_and_paragraphs() {
+    let (blocks_value, words) = docx_extract(&fixture("sample.docx")).unwrap();
+    let blocks = blocks_value.as_array().expect("blocks is array");
+    let kinds: Vec<&str> = blocks.iter()
+        .map(|b| b.get("kind").and_then(|v| v.as_str()).unwrap_or(""))
+        .collect();
+    assert!(kinds.contains(&"heading"), "kinds: {kinds:?}");
+    assert!(kinds.contains(&"paragraph"), "kinds: {kinds:?}");
+    assert!(kinds.contains(&"table"), "kinds: {kinds:?}");
+    assert!(words > 0);
 }
