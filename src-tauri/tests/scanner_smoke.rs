@@ -10,6 +10,25 @@ fn fixtures_root() -> PathBuf {
     p
 }
 
+fn isolated_fixture() -> PathBuf {
+    let tmp = tempfile::tempdir().unwrap();
+    let src = fixtures_root();
+    let dst: PathBuf = tmp.path().to_path_buf();
+    for entry in walkdir::WalkDir::new(&src) {
+        let entry = entry.unwrap();
+        let rel = entry.path().strip_prefix(&src).unwrap();
+        let target = dst.join(rel);
+        if entry.file_type().is_dir() {
+            std::fs::create_dir_all(&target).unwrap();
+        } else {
+            std::fs::copy(entry.path(), &target).unwrap();
+        }
+    }
+    // Keep tmp alive for the lifetime of the test by leaking it.
+    std::mem::forget(tmp);
+    dst
+}
+
 #[test]
 fn classify_type_basic() {
     assert_eq!(classify_type("md"), Some("markdown"));
@@ -21,13 +40,13 @@ fn classify_type_basic() {
 
 #[test]
 fn scan_creates_categories_and_resources_from_fixture() {
-    let tmp = tempfile::tempdir().unwrap();
-    let db_path = tmp.path().join("test.db");
+    let db_tmp = tempfile::tempdir().unwrap();
+    let db_path = db_tmp.path().join("test.db");
     let mut db = Db::open(&db_path).unwrap();
     db.migrate().unwrap();
 
     let cfg = ScanConfig {
-        knowledge_root: fixtures_root(),
+        knowledge_root: isolated_fixture(),
     };
     let summary = scan(&db, &cfg).unwrap();
     assert!(summary.errors_count == 0, "errors: {summary:?}");
@@ -50,12 +69,12 @@ fn scan_creates_categories_and_resources_from_fixture() {
 
 #[test]
 fn scan_idempotent_no_changes() {
-    let tmp = tempfile::tempdir().unwrap();
-    let db_path = tmp.path().join("test.db");
+    let db_tmp = tempfile::tempdir().unwrap();
+    let db_path = db_tmp.path().join("test.db");
     let mut db = Db::open(&db_path).unwrap();
     db.migrate().unwrap();
     let cfg = ScanConfig {
-        knowledge_root: fixtures_root(),
+        knowledge_root: isolated_fixture(),
     };
     let s1 = scan(&db, &cfg).unwrap();
     let s2 = scan(&db, &cfg).unwrap();
@@ -64,17 +83,18 @@ fn scan_idempotent_no_changes() {
 
 #[test]
 fn scan_removes_resource_when_file_deleted() {
-    let tmp = tempfile::tempdir().unwrap();
-    let db_path = tmp.path().join("test.db");
+    let db_tmp = tempfile::tempdir().unwrap();
+    let db_path = db_tmp.path().join("test.db");
     let mut db = Db::open(&db_path).unwrap();
     db.migrate().unwrap();
+    let root = isolated_fixture();
     let cfg = ScanConfig {
-        knowledge_root: fixtures_root(),
+        knowledge_root: root.clone(),
     };
     scan(&db, &cfg).unwrap();
 
     // 删除一个资源文件，再扫描
-    let target = fixtures_root().join("01-foundations").join("01-mathematics").join("calculus-notes.md");
+    let target = root.join("01-foundations").join("01-mathematics").join("calculus-notes.md");
     std::fs::remove_file(&target).unwrap();
 
     let summary = scan(&db, &cfg).unwrap();
