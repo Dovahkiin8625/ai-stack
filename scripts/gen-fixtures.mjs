@@ -50,6 +50,14 @@ async function main() {
     '# Heading\n\nHello **world**.\n\n- item 1\n- item 2\n',
     'utf8',
   );
+  // 最小化有效 PDF（使用 pdf-lib 构造 1 页文本 PDF）
+  const { PDFDocument, StandardFonts } = await import('pdf-lib');
+  const pdfDoc = await PDFDocument.create();
+  const page = pdfDoc.addPage([612, 792]);
+  const font = await pdfDoc.embedFont(StandardFonts.Helvetica);
+  page.drawText('Hello PDF', { x: 100, y: 700, size: 24, font });
+  const pdfBytes = await pdfDoc.save();
+  await writeFile(join(readers, 'sample.pdf'), pdfBytes);
 
   console.log(`fixtures written under ${ROOT}`);
 }
