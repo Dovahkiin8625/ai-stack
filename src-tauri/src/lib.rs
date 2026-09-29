@@ -1,6 +1,6 @@
 mod menu;
 pub mod db;
-mod scanner;
+pub mod scanner;
 mod reader;
 mod commands;
 mod readers;

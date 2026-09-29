@@ -33,3 +33,7 @@ data/
 
 # 临时工作区（superpowers SDD）
 .superpowers/
+
+# Phase 2 test fixtures
+src-tauri/tests/fixtures/
+!src-tauri/tests/fixtures/.gitkeep
