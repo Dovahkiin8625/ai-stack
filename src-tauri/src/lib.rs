@@ -1,5 +1,5 @@
 mod menu;
-mod db;
+pub mod db;
 mod scanner;
 mod reader;
 mod commands;
