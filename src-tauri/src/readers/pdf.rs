@@ -13,7 +13,14 @@ pub fn extract(path: &Path) -> Result<(Vec<(usize, String)>, usize)> {
             Vec::new()
         }
     };
-    let count = pages.len().max(text_page_count(path).unwrap_or(0));
+    let text_count = text_page_count(path).unwrap_or_else(|e| {
+        eprintln!("[pdf] text extract failed ({e:#})");
+        0
+    });
+    let count = pages.len().max(text_count);
+    if pages.is_empty() && count == 0 {
+        anyhow::bail!("pdf read failed: no pages rasterizable and no text extractable");
+    }
     Ok((pages, count))
 }
 

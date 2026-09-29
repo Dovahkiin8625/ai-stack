@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
-#[serde(tag = "type")]
+#[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ResourceContent {
     Markdown { html: String, word_count: usize },
     Pdf { pages: Vec<PdfPageDataUrl>, page_count: usize },
@@ -14,6 +14,7 @@ pub enum ResourceContent {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PdfPageDataUrl {
     pub index: usize,
     pub data_url: String,

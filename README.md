@@ -23,7 +23,7 @@ PDF 阅读器依赖 `pdfium-render` crate，需要 `pdfium.dll`：
 
 1. 从 https://github.com/nicklockwood/pdfium-binaries/releases 下载 `pdfium-windows-x64.zip`
 2. 解压得到 `pdfium.dll`
-3. 放置于 `resources/bin/pdfium-windows-x64/pdfium.dll`（`tauri.conf.json` 的 `bundle.resources` 已包含此路径）
+3. 放置于 `src-tauri/resources/bin/pdfium-windows-x64/pdfium.dll`（`tauri.conf.json` 的 `bundle.resources` 已包含此路径）
 
 如果 `pdfium.dll` 缺失，PDF 阅读器自动回退到纯文本提取（`pdf-extract` crate）。
 

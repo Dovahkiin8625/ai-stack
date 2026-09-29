@@ -11,6 +11,7 @@ pub struct ScanConfig {
 }
 
 #[derive(Debug, Default, Clone, serde::Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct ScanSummary {
     pub categories_count: usize,
     pub resources_count: usize,

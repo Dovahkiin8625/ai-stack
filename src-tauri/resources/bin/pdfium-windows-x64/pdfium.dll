@@ -1,0 +1,1 @@
+placeholder pdfium.dll — actual binary to be downloaded per README; Tauri build requires the path to exist at compile time.

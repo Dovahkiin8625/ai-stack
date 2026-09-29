@@ -41,3 +41,4 @@ src-tauri/tests/fixtures/*
 # Phase 2 pdfium binary (download manually per README)
 resources/bin/*
 !resources/bin/.gitkeep
+src-tauri/resources/bin/pdfium-windows-x64/pdfium.dll

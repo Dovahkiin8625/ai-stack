@@ -1,8 +1,8 @@
 mod menu;
 pub mod db;
 pub mod scanner;
-mod reader;
-mod commands;
+pub mod reader;
+pub mod commands;
 pub mod readers;
 
 use tauri::{Emitter, Manager};

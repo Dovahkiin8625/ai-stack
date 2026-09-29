@@ -32,6 +32,7 @@ fn resolve_db_path(app: &AppHandle) -> PathBuf {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct CategoryDto {
     pub path: String,
     pub parent_path: Option<String>,
@@ -40,6 +41,7 @@ pub struct CategoryDto {
 }
 
 #[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
 pub struct ResourceDto {
     pub id: i64,
     pub category_path: String,
