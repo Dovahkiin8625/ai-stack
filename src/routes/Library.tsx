@@ -3,12 +3,20 @@ import { useLibraryStore } from '../stores/library';
 import { listen } from '@tauri-apps/api/event';
 import type { ScanProgress as ScanProgressEvt } from '../types';
 import ScanProgress from '../components/library/ScanProgress';
+import Tree from '../components/library/Tree';
+import ResourceList from '../components/library/ResourceList';
 
 export default function Library() {
   const status = useLibraryStore((s) => s.status);
   const summary = useLibraryStore((s) => s.summary);
   const error = useLibraryStore((s) => s.error);
   const scan = useLibraryStore((s) => s.scan);
+  const categories = useLibraryStore((s) => s.categories);
+  const selectedCategoryPath = useLibraryStore((s) => s.selectedCategoryPath);
+  const selectCategory = useLibraryStore((s) => s.selectCategory);
+  const resources = useLibraryStore((s) => s.resources);
+  const selectedResourceId = useLibraryStore((s) => s.selectedResourceId);
+  const selectResource = useLibraryStore((s) => s.selectResource);
   const [progress, setProgress] = useState<ScanProgressEvt | undefined>(undefined);
 
   useEffect(() => {
@@ -35,12 +43,19 @@ export default function Library() {
       </header>
       <ScanProgress status={status} progress={progress} summary={summary} error={error} />
       <div className="grid flex-1 grid-cols-[240px_320px_1fr] gap-4 overflow-hidden">
-        {/* 任务 11 替换 Tree 和 ResourceList */}
-        <aside className="rounded-md border border-border bg-surface p-2 text-sm text-text-muted">
-          分类树（任务 11）
+        <aside className="overflow-y-auto rounded-md border border-border bg-surface p-2">
+          <Tree
+            categories={categories}
+            selectedPath={selectedCategoryPath}
+            onSelect={(p) => selectCategory(p)}
+          />
         </aside>
-        <section className="rounded-md border border-border bg-surface p-2 text-sm text-text-muted">
-          资源列表（任务 11）
+        <section className="overflow-y-auto rounded-md border border-border bg-surface p-2">
+          <ResourceList
+            resources={resources}
+            selectedId={selectedResourceId}
+            onSelect={(id) => selectResource(id)}
+          />
         </section>
         <section className="rounded-md border border-border bg-surface p-2 text-sm text-text-muted">
           阅读器（任务 12）
