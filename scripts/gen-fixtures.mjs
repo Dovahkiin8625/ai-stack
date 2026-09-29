@@ -42,6 +42,15 @@ async function main() {
     'utf8',
   );
 
+  // fixtures for readers
+  const readers = join(here, '..', 'src-tauri', 'tests', 'fixtures', 'readers');
+  await mkdir(readers, { recursive: true });
+  await writeFile(
+    join(readers, 'simple.md'),
+    '# Heading\n\nHello **world**.\n\n- item 1\n- item 2\n',
+    'utf8',
+  );
+
   console.log(`fixtures written under ${ROOT}`);
 }
 

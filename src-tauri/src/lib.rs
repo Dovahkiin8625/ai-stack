@@ -3,7 +3,7 @@ pub mod db;
 pub mod scanner;
 mod reader;
 mod commands;
-mod readers;
+pub mod readers;
 
 use tauri::Emitter;
 
