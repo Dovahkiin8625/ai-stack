@@ -1,7 +1,6 @@
 // scripts/make-icons.mjs
-// 用 Node 内置 zlib 生成纯色 PNG 占位图标。
-// ICO 文件格式较复杂，需要 Rust 工具链装好后用 `npx @tauri-apps/cli icon` 生成。
-import { writeFileSync, mkdirSync } from 'node:fs';
+// 用 Node 内置 zlib 生成纯色 PNG 占位图标，并把 PNG 嵌入 .ico 容器。
+import { writeFileSync, mkdirSync, readFileSync } from 'node:fs';
 import { deflateSync } from 'node:zlib';
 
 function makePng(width, height, color = [37, 99, 235]) {
@@ -69,5 +68,28 @@ for (const { name, size } of sizes) {
   console.log(`Created src-tauri/icons/${name} (${size}x${size})`);
 }
 
-console.log('\n注意: icon.ico 需要 Rust 工具链安装后运行:');
+// 把 32x32 PNG 嵌入到 ICO 容器（Vista+ 支持 PNG-in-ICO 格式）
+// ICO header: 6 bytes + 16 bytes per entry + PNG payload
+function makeIco(pngBuffer, size) {
+  const header = Buffer.alloc(6);
+  header.writeUInt16LE(0, 0);                  // reserved
+  header.writeUInt16LE(1, 2);                  // type = icon
+  header.writeUInt16LE(1, 4);                  // count = 1
+  const entry = Buffer.alloc(16);
+  entry[0] = size === 256 ? 0 : size;          // width (0 = 256)
+  entry[1] = size === 256 ? 0 : size;          // height
+  entry[2] = 0;                                // colors in palette
+  entry[3] = 0;                                // reserved
+  entry.writeUInt16LE(1, 4);                   // planes
+  entry.writeUInt16LE(32, 6);                  // bit count
+  entry.writeUInt32LE(pngBuffer.length, 8);    // size
+  entry.writeUInt32LE(6 + 16, 12);             // offset to PNG data
+  return Buffer.concat([header, entry, pngBuffer]);
+}
+
+const png32 = readFileSync('src-tauri/icons/32x32.png');
+writeFileSync('src-tauri/icons/icon.ico', makeIco(png32, 32));
+console.log('Created src-tauri/icons/icon.ico (PNG-in-ICO, 32x32)');
+
+console.log('\n提示: 安装 Rust 后可重新生成更高质量图标:');
 console.log('  cd C:\\project\\ai-stack && npx @tauri-apps/cli icon src-tauri/icons/icon.png');

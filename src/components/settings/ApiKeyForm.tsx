@@ -1,11 +1,9 @@
 import { useEffect, useState } from 'react';
 import { Eye, EyeOff, Save } from 'lucide-react';
-import { getSettings, saveSettings, type AppSettings } from '../../lib/tauri';
+import { getSettings, saveSettings, DEFAULTS, type AppSettings } from '../../lib/tauri';
 
 export default function ApiKeyForm() {
-  const [form, setForm] = useState<AppSettings>({
-    apiKey: '', baseUrl: 'https://api.anthropic.com', model: 'claude-sonnet-4-5',
-  });
+  const [form, setForm] = useState<AppSettings>(DEFAULTS);
   const [showKey, setShowKey] = useState(false);
   const [status, setStatus] = useState<'idle' | 'loading' | 'saved' | 'error'>('idle');
 

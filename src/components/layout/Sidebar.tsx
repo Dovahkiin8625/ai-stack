@@ -1,4 +1,4 @@
-import { NavLink } from 'react-router-dom';
+import { NavLink, useLocation } from 'react-router-dom';
 import { BookOpen, Layers, MessageSquareText, Eye, Languages, Mic,
          Wrench, Bot, Shield, Sparkles, Package, TrendingUp } from 'lucide-react';
 import { CATEGORIES } from '../../data/categories';
@@ -9,7 +9,12 @@ const ICONS: Record<string, ComponentType<{ size?: number }>> = {
   Wrench, Bot, Shield, Sparkles, Package, TrendingUp,
 };
 
+interface LocationState { focusCategory?: string }
+
 export default function Sidebar() {
+  const location = useLocation();
+  const focused = (location.state as LocationState | null)?.focusCategory;
+
   return (
     <aside
       aria-label="知识分类导航"
@@ -25,14 +30,16 @@ export default function Sidebar() {
         <ul className="space-y-0.5">
           {CATEGORIES.map((cat) => {
             const Icon = cat.icon && ICONS[cat.icon];
+            // 高亮规则：在 /library 路由且 state.focusCategory 与本分类 path 匹配
+            const isFocused = location.pathname === '/library' && focused === cat.path;
             return (
               <li key={cat.id}>
                 <NavLink
                   to="/library"
                   state={{ focusCategory: cat.path }}
-                  className={({ isActive }) =>
+                  className={() =>
                     `flex items-center gap-2 rounded-md px-2 py-1.5 text-sm transition-colors ${
-                      isActive
+                      isFocused
                         ? 'bg-accent/10 text-accent'
                         : 'text-text hover:bg-surface-2'
                     }`

@@ -21,6 +21,8 @@ const DEFAULTS: AppSettings = {
   model: 'claude-sonnet-4-5',
 };
 
+export { DEFAULTS };
+
 let storePromise: Promise<Store> | null = null;
 
 function getStore(): Promise<Store> {
