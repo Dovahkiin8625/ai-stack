@@ -5,7 +5,7 @@ use crate::scanner::{self, ScanConfig, ScanSummary};
 use anyhow::Context;
 use serde::Serialize;
 use std::path::PathBuf;
-use tauri::{AppHandle, Manager, State};
+use tauri::{AppHandle, Emitter, Manager, State};
 
 /// 跨命令共享的不可变路径配置。
 /// 在 setup 阶段初始化一次；每个命令按需 `clone`。
@@ -79,6 +79,13 @@ pub async fn scan_library(
     let db_path = state.db_path.clone();
     let knowledge_root = state.knowledge_root.clone();
     ensure_db_dir(&db_path);
+    let app2 = app.clone();
+    let progress_emit = move |phase: &str| {
+        let _ = app2.emit(
+            "scan_progress",
+            serde_json::json!({"phase": phase, "current": 0, "total": 0}),
+        );
+    };
     tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<ScanSummary> {
         let mut db = Db::open(&db_path)
             .with_context(|| format!("open {}", db_path.display()))?;
@@ -87,8 +94,10 @@ pub async fn scan_library(
             db.conn.execute("DELETE FROM resources", []).ok();
             db.conn.execute("DELETE FROM categories", []).ok();
         }
+        progress_emit("walking");
         let cfg = ScanConfig { knowledge_root: knowledge_root.clone() };
         let summary = scanner::scan(&db, &cfg)?;
+        progress_emit("done");
         Ok(summary)
     })
     .await
