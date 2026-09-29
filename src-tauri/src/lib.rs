@@ -1,11 +1,11 @@
 mod menu;
-pub mod db;
-pub mod scanner;
+mod db;
+mod scanner;
 mod reader;
 mod commands;
-pub mod readers;
+mod readers;
 
-use tauri::Emitter;
+use tauri::{Emitter, Manager};
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -21,9 +21,16 @@ pub fn run() {
             app.on_menu_event(|app, event| {
                 let _ = app.emit("menu", event.id().0.as_str());
             });
+            // AppState 只持有不可变路径；不可在 commands::build_state 之后再修改
+            app.manage(commands::build_state(app.handle()));
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![commands::scan_library])
+        .invoke_handler(tauri::generate_handler![
+            commands::scan_library,
+            commands::list_categories,
+            commands::list_resources,
+            commands::read_resource,
+        ])
         .run(tauri::generate_context!())
         .expect("error while running ai-stack application");
 }
