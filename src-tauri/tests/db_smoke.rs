@@ -20,6 +20,14 @@ fn upsert_resource_returns_stable_id_across_updates() {
     let mut db = Db::open(&path).unwrap();
     db.migrate().unwrap();
 
+    db.upsert_category("01-foundations".into(), None, "Foundations".into(), 1).unwrap();
+    db.upsert_category(
+        "01-foundations/01-mathematics".into(),
+        Some("01-foundations".into()),
+        "Mathematics".into(),
+        1,
+    ).unwrap();
+
     let input = ResourceInput {
         category_path: "01-foundations/01-mathematics".into(),
         rel_path: "linear-algebra/notes.md".into(),
@@ -82,6 +90,8 @@ fn delete_missing_removes_rows_not_in_set() {
     let path = tmp.path().join("test.db");
     let mut db = Db::open(&path).unwrap();
     db.migrate().unwrap();
+
+    db.upsert_category("x".into(), None, "X".into(), 1).unwrap();
 
     for rel in ["a.md", "b.md", "c.md"] {
         db.upsert_resource(ResourceInput {

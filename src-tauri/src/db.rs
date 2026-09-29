@@ -80,7 +80,8 @@ impl Db {
                 indexed_at TEXT NOT NULL,
                 page_count INTEGER,
                 word_count INTEGER,
-                UNIQUE(category_path, rel_path)
+                UNIQUE(category_path, rel_path),
+                FOREIGN KEY (category_path) REFERENCES categories(path)
              );
              CREATE INDEX IF NOT EXISTS idx_resources_category ON resources(category_path);
              CREATE INDEX IF NOT EXISTS idx_resources_hash ON resources(hash);",
