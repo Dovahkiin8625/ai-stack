@@ -78,6 +78,19 @@ async function main() {
   });
   const buf = await Packer.toBuffer(doc);
   await writeFile(join(readers, 'sample.docx'), buf);
+  const PptxGenJS = (await import('pptxgenjs')).default;
+  const pres = new PptxGenJS();
+  let slide = pres.addSlide();
+  slide.addText('Slide One Title', { x: 0.5, y: 0.3, fontSize: 24 });
+  slide.addText('First bullet', { x: 0.5, y: 1.0 });
+  slide.addText('Second bullet', { x: 0.5, y: 1.5 });
+  slide.addNotes('Speaker notes for slide one.');
+  slide = pres.addSlide();
+  slide.addText('Slide Two Title', { x: 0.5, y: 0.3, fontSize: 24 });
+  slide.addText('Only one bullet', { x: 0.5, y: 1.0 });
+  slide.addNotes('Notes for slide two.');
+  const pptBuf = await pres.write({ outputType: 'nodebuffer' });
+  await writeFile(join(readers, 'sample.pptx'), pptBuf);
 
   console.log(`fixtures written under ${ROOT}`);
 }

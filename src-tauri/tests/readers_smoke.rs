@@ -1,6 +1,7 @@
 use ai_stack_lib::readers::markdown::extract;
 use ai_stack_lib::readers::pdf::extract as pdf_extract;
 use ai_stack_lib::readers::docx::extract as docx_extract;
+use ai_stack_lib::readers::pptx::extract as pptx_extract;
 use std::path::PathBuf;
 
 fn fixture(name: &str) -> PathBuf {
@@ -49,4 +50,15 @@ fn docx_extracts_headings_and_paragraphs() {
     assert!(kinds.contains(&"paragraph"), "kinds: {kinds:?}");
     assert!(kinds.contains(&"table"), "kinds: {kinds:?}");
     assert!(words > 0);
+}
+
+#[test]
+fn pptx_extracts_slides() {
+    let (value, _) = pptx_extract(&fixture("sample.pptx")).unwrap();
+    let slides = value.get("slides").and_then(|v| v.as_array()).expect("slides array");
+    assert!(slides.len() >= 2, "got {} slides", slides.len());
+    let first = &slides[0];
+    assert!(first.get("title").is_some());
+    let body = first.get("body").and_then(|v| v.as_array()).unwrap();
+    assert!(!body.is_empty(), "body empty");
 }
