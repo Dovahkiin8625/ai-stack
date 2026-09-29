@@ -55,10 +55,27 @@ fn docx_extracts_headings_and_paragraphs() {
 #[test]
 fn pptx_extracts_slides() {
     let (value, _) = pptx_extract(&fixture("sample.pptx")).unwrap();
-    let slides = value.get("slides").and_then(|v| v.as_array()).expect("slides array");
+    // Pptx extractor returns the slides array directly (NOT wrapped in {"slides", "slide_count"}).
+    // Wrapping was a bug: frontend `slides[idx].index` then crashed on undefined.
+    let slides = value.as_array().expect("value is the slides array directly");
     assert!(slides.len() >= 2, "got {} slides", slides.len());
     let first = &slides[0];
     assert!(first.get("title").is_some());
     let body = first.get("body").and_then(|v| v.as_array()).unwrap();
     assert!(!body.is_empty(), "body empty");
+}
+
+#[test]
+fn pptx_value_is_array_not_wrapped_object() {
+    // Regression: previously pptx_extract returned a wrapped object
+    // `{"slides": [...], "slide_count": N}` which broke PptxReader.tsx.
+    let (value, _) = pptx_extract(&fixture("sample.pptx")).unwrap();
+    assert!(
+        value.is_array(),
+        "pptx value should be the slides array, not a wrapper object"
+    );
+    assert!(
+        value.get("slides").is_none(),
+        "value must not be wrapped in {{'slides': ...}}"
+    );
 }

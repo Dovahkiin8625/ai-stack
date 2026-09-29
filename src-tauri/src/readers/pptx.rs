@@ -71,7 +71,7 @@ pub fn extract(path: &Path) -> Result<(Value, usize)> {
     }
 
     let slide_count = slides.len();
-    Ok((json!({"slides": slides, "slide_count": slide_count}), slide_count))
+    Ok((serde_json::Value::Array(slides), slide_count))
 }
 
 fn parse_rels(xml: &str) -> std::collections::HashMap<String, String> {
