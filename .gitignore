@@ -37,3 +37,7 @@ data/
 # Phase 2 test fixtures
 src-tauri/tests/fixtures/
 !src-tauri/tests/fixtures/.gitkeep
+
+# Phase 2 pdfium binary (download manually per README)
+resources/bin/
+!resources/bin/.gitkeep

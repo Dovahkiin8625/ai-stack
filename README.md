@@ -11,6 +11,22 @@ Windows 平台上的 AI 学习工作台。在同一个桌面应用里完成：
 **Phase 1（当前）**：应用骨架 + 12 类 AI 知识目录占位。
 后续阶段：见 [docs/roadmap.md](./docs/roadmap.md)。
 
+## Phase 2（当前）—— 知识库资源管理
+
+- 自动扫描 `resources/knowledge/`，索引到本地 SQLite（`data/ai-stack.db`）
+- 三栏阅读：分类树 / 资源列表 / 阅读器
+- 支持 Markdown / PDF / DOCX / PPTX 四种格式
+
+### PDF 渲染前置依赖（pdfium）
+
+PDF 阅读器依赖 `pdfium-render` crate，需要 `pdfium.dll`：
+
+1. 从 https://github.com/nicklockwood/pdfium-binaries/releases 下载 `pdfium-windows-x64.zip`
+2. 解压得到 `pdfium.dll`
+3. 放置于 `resources/bin/pdfium-windows-x64/pdfium.dll`（`tauri.conf.json` 的 `bundle.resources` 已包含此路径）
+
+如果 `pdfium.dll` 缺失，PDF 阅读器自动回退到纯文本提取（`pdf-extract` crate）。
+
 ## 技术栈
 
 - [Tauri 2](https://v2.tauri.app/) + Rust
