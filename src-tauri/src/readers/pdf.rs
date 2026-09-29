@@ -2,11 +2,8 @@ use anyhow::{Context, Result};
 use base64::Engine;
 use pdfium_render::prelude::*;
 use std::path::Path;
-use std::sync::OnceLock;
 
 const RASTER_DPI: f32 = 144.0;
-
-static PDFIUM_OK: OnceLock<bool> = OnceLock::new();
 
 pub fn extract(path: &Path) -> Result<(Vec<(usize, String)>, usize)> {
     let pages = match rasterize_with_pdfium(path) {
@@ -17,22 +14,15 @@ pub fn extract(path: &Path) -> Result<(Vec<(usize, String)>, usize)> {
         }
     };
     let count = pages.len().max(text_page_count(path).unwrap_or(0));
-    if pages.is_empty() {
-        // 兜底：尝试纯文本，确保 page_count 仍正确
-    }
     Ok((pages, count))
 }
 
 fn rasterize_with_pdfium(path: &Path) -> Result<Vec<(usize, String)>> {
     let bindings = match Pdfium::bind_to_system_library() {
         Ok(b) => b,
-        Err(e) => {
-            PDFIUM_OK.set(false).ok();
-            anyhow::bail!("pdfium init: {e}");
-        }
+        Err(e) => anyhow::bail!("pdfium init: {e}"),
     };
     let pdfium = Pdfium::new(bindings);
-    PDFIUM_OK.set(true).ok();
     let doc = pdfium
         .load_pdf_from_file(path, None)
         .with_context(|| format!("load pdf {}", path.display()))?;

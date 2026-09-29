@@ -33,10 +33,10 @@ pub fn extract(path: &Path) -> Result<(Value, usize)> {
             docx_rs::DocumentChild::Table(t) => {
                 let mut rows: Vec<Vec<String>> = Vec::new();
                 for row_child in &t.rows {
-                    let docx_rs::TableChild::TableRow(row) = row_child;
+                    let docx_rs::TableChild::TableRow(row) = row_child else { continue };
                     let mut cells: Vec<String> = Vec::new();
                     for cell_child in &row.cells {
-                        let docx_rs::TableRowChild::TableCell(cell) = cell_child;
+                        let docx_rs::TableRowChild::TableCell(cell) = cell_child else { continue };
                         let mut cell_text = String::new();
                         for c in &cell.children {
                             if let docx_rs::TableCellContent::Paragraph(pp) = c {
