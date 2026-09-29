@@ -1,8 +1,51 @@
+import { useEffect, useState } from 'react';
+import { useLibraryStore } from '../stores/library';
+import { listen } from '@tauri-apps/api/event';
+import type { ScanProgress as ScanProgressEvt } from '../types';
+import ScanProgress from '../components/library/ScanProgress';
+
 export default function Library() {
+  const status = useLibraryStore((s) => s.status);
+  const summary = useLibraryStore((s) => s.summary);
+  const error = useLibraryStore((s) => s.error);
+  const scan = useLibraryStore((s) => s.scan);
+  const [progress, setProgress] = useState<ScanProgressEvt | undefined>(undefined);
+
+  useEffect(() => {
+    let unlisten: (() => void) | undefined;
+    (async () => {
+      unlisten = await listen<ScanProgressEvt>('scan_progress', (e) => setProgress(e.payload));
+      if (status === 'idle') await scan(false);
+    })();
+    return () => { unlisten?.(); };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
   return (
-    <div className="p-6">
-      <h2 className="text-xl font-semibold">知识库</h2>
-      <p className="mt-2 text-text-muted">在此浏览 AI 知识分类与资源（阶段 2 实现）。</p>
+    <div className="flex h-full flex-col gap-4 p-6">
+      <header className="flex items-center justify-between">
+        <h2 className="text-xl font-semibold">知识库</h2>
+        <button
+          onClick={() => scan(true)}
+          disabled={status === 'scanning'}
+          className="rounded-md border border-border bg-surface px-3 py-1.5 text-sm hover:bg-surface-2 disabled:opacity-50"
+        >
+          刷新
+        </button>
+      </header>
+      <ScanProgress status={status} progress={progress} summary={summary} error={error} />
+      <div className="grid flex-1 grid-cols-[240px_320px_1fr] gap-4 overflow-hidden">
+        {/* 任务 11 替换 Tree 和 ResourceList */}
+        <aside className="rounded-md border border-border bg-surface p-2 text-sm text-text-muted">
+          分类树（任务 11）
+        </aside>
+        <section className="rounded-md border border-border bg-surface p-2 text-sm text-text-muted">
+          资源列表（任务 11）
+        </section>
+        <section className="rounded-md border border-border bg-surface p-2 text-sm text-text-muted">
+          阅读器（任务 12）
+        </section>
+      </div>
     </div>
   );
 }
