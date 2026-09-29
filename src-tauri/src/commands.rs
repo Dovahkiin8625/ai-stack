@@ -154,6 +154,48 @@ pub fn read_resource(id: i64, app: AppHandle) -> Result<ResourceContent, String>
 pub fn build_state(app: &AppHandle) -> AppState {
     let db_path = resolve_db_path(app);
     let cwd = std::env::current_dir().unwrap_or_default();
-    let knowledge_root = cwd.join("resources").join("knowledge");
+    let knowledge_root = find_knowledge_root(&cwd)
+        .unwrap_or_else(|| cwd.join("resources").join("knowledge"));
     AppState { db_path, knowledge_root }
+}
+
+/// 从 `start` 向上查找 `resources/knowledge/` 目录。
+/// 解决 `cargo run`（cwd 在 src-tauri/）与 `tauri build`（cwd 在项目根）
+/// 工作目录不一致的问题。
+fn find_knowledge_root(start: &std::path::Path) -> Option<PathBuf> {
+    let mut cur: Option<&std::path::Path> = Some(start);
+    while let Some(p) = cur {
+        let candidate = p.join("resources").join("knowledge");
+        if candidate.is_dir() {
+            return Some(candidate);
+        }
+        cur = p.parent();
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::find_knowledge_root;
+    use std::path::PathBuf;
+
+    #[test]
+    fn find_knowledge_root_walks_up_to_directory() {
+        // 在 tmp 下构造 project_root/src-tauri/，把 project_root/resources/knowledge/ 建出来
+        let tmp = tempfile::tempdir().unwrap();
+        let project_root = tmp.path();
+        let deep = project_root.join("src-tauri");
+        std::fs::create_dir_all(&deep).unwrap();
+        let knowledge = project_root.join("resources").join("knowledge");
+        std::fs::create_dir_all(&knowledge).unwrap();
+        // 从 src-tauri（cwd）开始查找，应向上找到 project_root/resources/knowledge
+        let found = find_knowledge_root(&deep).unwrap();
+        assert_eq!(found.canonicalize().unwrap(), knowledge.canonicalize().unwrap());
+    }
+
+    #[test]
+    fn find_knowledge_root_returns_none_when_missing() {
+        let tmp = tempfile::tempdir().unwrap();
+        assert!(find_knowledge_root(tmp.path()).is_none());
+    }
 }
