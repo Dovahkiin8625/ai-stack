@@ -5,6 +5,12 @@ import type { ScanProgress as ScanProgressEvt } from '../types';
 import ScanProgress from '../components/library/ScanProgress';
 import Tree from '../components/library/Tree';
 import ResourceList from '../components/library/ResourceList';
+import { AlertCircle } from 'lucide-react';
+import ReaderToolbar from '../components/library/ReaderToolbar';
+import MarkdownReader from '../components/library/reader/MarkdownReader';
+import PdfReader from '../components/library/reader/PdfReader';
+import DocxReader from '../components/library/reader/DocxReader';
+import PptxReader from '../components/library/reader/PptxReader';
 
 export default function Library() {
   const status = useLibraryStore((s) => s.status);
@@ -17,6 +23,8 @@ export default function Library() {
   const resources = useLibraryStore((s) => s.resources);
   const selectedResourceId = useLibraryStore((s) => s.selectedResourceId);
   const selectResource = useLibraryStore((s) => s.selectResource);
+  const content = useLibraryStore((s) => s.resourceContent);
+  const current = resources.find((r) => r.id === useLibraryStore.getState().selectedResourceId);
   const [progress, setProgress] = useState<ScanProgressEvt | undefined>(undefined);
 
   useEffect(() => {
@@ -57,8 +65,46 @@ export default function Library() {
             onSelect={(id) => selectResource(id)}
           />
         </section>
-        <section className="rounded-md border border-border bg-surface p-2 text-sm text-text-muted">
-          阅读器（任务 12）
+        <section className="flex flex-col overflow-hidden rounded-md border border-border bg-bg">
+          {current ? (
+            <>
+              <ReaderToolbar
+                title={current.title}
+                type={current.type}
+                pageCount={current.pageCount ?? undefined}
+                wordCount={current.wordCount ?? undefined}
+                onBack={() => selectResource(null)}
+              />
+              <div className="flex-1 overflow-auto">
+                {content ? (
+                  <>
+                    {content.type === 'markdown' && <MarkdownReader html={content.html} />}
+                    {content.type === 'pdf' && (
+                      <PdfReader pages={content.pages} pageCount={content.pageCount} />
+                    )}
+                    {content.type === 'docx' && (
+                      <DocxReader blocks={content.blocks} wordCount={content.wordCount} />
+                    )}
+                    {content.type === 'pptx' && (
+                      <PptxReader slides={content.slides} slideCount={content.slideCount} />
+                    )}
+                  </>
+                ) : (
+                  <div className="m-4 flex items-start gap-2 rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-700">
+                    <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                    <div>
+                      <div className="font-medium">无法读取：{current.title}</div>
+                      <div className="mt-1 text-xs text-red-600">{error ?? '请尝试刷新索引或更换文件'}</div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            </>
+          ) : (
+            <div className="flex h-full items-center justify-center p-6 text-sm text-text-muted">
+              {status === 'ready' ? '请选择左侧资源' : '等待索引完成'}
+            </div>
+          )}
         </section>
       </div>
     </div>
