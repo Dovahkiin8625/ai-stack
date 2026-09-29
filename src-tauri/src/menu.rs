@@ -46,6 +46,7 @@ pub fn build_menu<R: Runtime>(app: &AppHandle<R>) -> tauri::Result<Menu<R>> {
 }
 
 /// 给前端抛事件用：列出菜单项 ID（仅用于文档/校验）
+#[allow(dead_code)]
 pub fn menu_item_ids() -> Vec<&'static str> {
     vec![
         MENU_ID_OPEN_FOLDER,

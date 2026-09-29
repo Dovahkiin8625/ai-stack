@@ -1,6 +1,11 @@
 mod menu;
+mod db;
+mod scanner;
+mod reader;
+mod commands;
+mod readers;
 
-use tauri::Manager;
+use tauri::Emitter;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -13,12 +18,12 @@ pub fn run() {
         .setup(|app| {
             let menu = menu::build_menu(app.handle())?;
             app.set_menu(menu)?;
-            // 把菜单事件转发给前端，前端按 ID 决定动作
             app.on_menu_event(|app, event| {
                 let _ = app.emit("menu", event.id().0.as_str());
             });
             Ok(())
         })
+        .invoke_handler(tauri::generate_handler![commands::scan_library])
         .run(tauri::generate_context!())
         .expect("error while running ai-stack application");
 }
