@@ -10,7 +10,8 @@
     "tauri": "tauri",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "gen:fixtures": "node scripts/gen-fixtures.mjs"
+    "gen:fixtures": "node scripts/gen-fixtures.mjs",
+    "gen:samples": "node scripts/gen-samples.mjs"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",
