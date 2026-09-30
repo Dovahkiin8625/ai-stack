@@ -157,7 +157,7 @@ fn extract_text_runs(xml: &str) -> (Option<String>, Vec<String>) {
             Ok(Event::End(e)) => {
                 let name = e.local_name();
                 if name.as_ref() == b"p" {
-                    if let Some(mut p) = current.take() {
+                    if let Some(p) = current.take() {
                         if paragraphs.is_empty() && title.is_none() && !p.is_empty() {
                             title = Some(p.clone());
                         }

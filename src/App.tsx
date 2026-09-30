@@ -7,9 +7,16 @@ import Notes from './routes/Notes';
 import Dashboard from './routes/Dashboard';
 import Settings from './routes/Settings';
 import { useThemeStore } from './stores/theme';
+import { useLibraryStore } from './stores/library';
 
 export default function App() {
   const toggle = useThemeStore((s) => s.toggle);
+  const scan = useLibraryStore((s) => s.scan);
+
+  useEffect(() => {
+    // 启动时扫描 resources/knowledge/，把新文章入库
+    void scan(false);
+  }, [scan]);
 
   useEffect(() => {
     const unlisten = listen<string>('menu', (e) => {

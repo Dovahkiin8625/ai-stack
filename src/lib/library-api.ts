@@ -1,6 +1,9 @@
 import { invoke } from '@tauri-apps/api/core';
 import type {
   Category,
+  NewNoteInput,
+  Note,
+  NoteUpdateInput,
   Resource,
   ResourceContent,
   ScanSummary,
@@ -20,4 +23,20 @@ export async function listResources(categoryPath: string): Promise<Resource[]> {
 
 export async function readResource(id: number): Promise<ResourceContent> {
   return invoke<ResourceContent>('read_resource', { id });
+}
+
+export async function listNotes(resourceId: number): Promise<Note[]> {
+  return invoke<Note[]>('list_notes', { resourceId });
+}
+
+export async function createNote(input: NewNoteInput): Promise<Note> {
+  return invoke<Note>('create_note', { payload: input });
+}
+
+export async function updateNote(input: NoteUpdateInput): Promise<Note> {
+  return invoke<Note>('update_note', { payload: input });
+}
+
+export async function deleteNote(id: number): Promise<void> {
+  return invoke<void>('delete_note', { id });
 }

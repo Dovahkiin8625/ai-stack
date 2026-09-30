@@ -41,6 +41,17 @@ pub struct Db {
     pub conn: rusqlite::Connection,
 }
 
+#[derive(Debug, Clone)]
+pub struct NoteRow {
+    pub id: i64,
+    pub resource_id: i64,
+    pub content: String,
+    pub anchor_text: Option<String>,
+    pub anchor_occurrence: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
 impl Db {
     pub fn open(path: &Path) -> Result<Self> {
         if let Some(parent) = path.parent() {
@@ -84,7 +95,18 @@ impl Db {
                 FOREIGN KEY (category_path) REFERENCES categories(path)
              );
              CREATE INDEX IF NOT EXISTS idx_resources_category ON resources(category_path);
-             CREATE INDEX IF NOT EXISTS idx_resources_hash ON resources(hash);",
+             CREATE INDEX IF NOT EXISTS idx_resources_hash ON resources(hash);
+             CREATE TABLE IF NOT EXISTS notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                resource_id INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                anchor_text TEXT,
+                anchor_occurrence INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (resource_id) REFERENCES resources(id) ON DELETE CASCADE
+             );
+             CREATE INDEX IF NOT EXISTS idx_notes_resource ON notes(resource_id);",
         )?;
         let now = chrono::Utc::now().to_rfc3339();
         tx.execute(
@@ -216,5 +238,98 @@ impl Db {
             )?;
         }
         Ok(removed)
+    }
+
+    pub fn list_notes(&self, resource_id: i64) -> Result<Vec<NoteRow>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT id, resource_id, content, anchor_text, anchor_occurrence,
+                    created_at, updated_at
+             FROM notes WHERE resource_id = ?1
+             ORDER BY id",
+        )?;
+        let rows = stmt
+            .query_map([resource_id], |row| {
+                Ok(NoteRow {
+                    id: row.get(0)?,
+                    resource_id: row.get(1)?,
+                    content: row.get(2)?,
+                    anchor_text: row.get(3)?,
+                    anchor_occurrence: row.get(4)?,
+                    created_at: row.get(5)?,
+                    updated_at: row.get(6)?,
+                })
+            })?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        Ok(rows)
+    }
+
+    pub fn insert_note(
+        &self,
+        resource_id: i64,
+        content: &str,
+        anchor_text: Option<&str>,
+        anchor_occurrence: i64,
+    ) -> Result<NoteRow> {
+        let now = chrono::Utc::now().to_rfc3339();
+        self.conn.execute(
+            "INSERT INTO notes (resource_id, content, anchor_text, anchor_occurrence,
+                                created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+            params![resource_id, content, anchor_text, anchor_occurrence, now],
+        )?;
+        let id = self.conn.last_insert_rowid();
+        self.get_note(id)
+    }
+
+    pub fn update_note(
+        &self,
+        id: i64,
+        content: &str,
+        anchor_text: Option<&str>,
+        anchor_occurrence: i64,
+    ) -> Result<NoteRow> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let changed = self.conn.execute(
+            "UPDATE notes
+             SET content = ?1, anchor_text = ?2, anchor_occurrence = ?3, updated_at = ?4
+             WHERE id = ?5",
+            params![content, anchor_text, anchor_occurrence, now, id],
+        )?;
+        if changed == 0 {
+            anyhow::bail!("note {id} not found");
+        }
+        self.get_note(id)
+    }
+
+    pub fn delete_note(&self, id: i64) -> Result<()> {
+        let changed = self.conn.execute("DELETE FROM notes WHERE id = ?1", [id])?;
+        if changed == 0 {
+            anyhow::bail!("note {id} not found");
+        }
+        Ok(())
+    }
+
+    fn get_note(&self, id: i64) -> Result<NoteRow> {
+        let row = self
+            .conn
+            .query_row(
+                "SELECT id, resource_id, content, anchor_text, anchor_occurrence,
+                        created_at, updated_at
+                 FROM notes WHERE id = ?1",
+                [id],
+                |r| {
+                    Ok(NoteRow {
+                        id: r.get(0)?,
+                        resource_id: r.get(1)?,
+                        content: r.get(2)?,
+                        anchor_text: r.get(3)?,
+                        anchor_occurrence: r.get(4)?,
+                        created_at: r.get(5)?,
+                        updated_at: r.get(6)?,
+                    })
+                },
+            )
+            .with_context(|| format!("note {id} not found"))?;
+        Ok(row)
     }
 }

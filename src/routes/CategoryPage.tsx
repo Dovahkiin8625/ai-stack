@@ -1,17 +1,23 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import { AlertCircle } from 'lucide-react';
 import { CATEGORIES } from '../data/categories';
 import * as api from '../lib/library-api';
 import { useLibraryStore } from '../stores/library';
+import { useNotesStore } from '../stores/notes';
 import type { Resource } from '../types';
 import ResourceList from '../components/library/ResourceList';
 import ReaderToolbar from '../components/library/ReaderToolbar';
-import MarkdownReader from '../components/library/reader/MarkdownReader';
+import MarkdownReader, {
+  type MarkdownReaderHandle,
+} from '../components/library/reader/MarkdownReader';
 import PdfReader from '../components/library/reader/PdfReader';
 import DocxReader from '../components/library/reader/DocxReader';
 import PptxReader from '../components/library/reader/PptxReader';
 import SubCategoryTabs from '../components/library/SubCategoryTabs';
+import NotesPanel, {
+  type NotesPanelHandle,
+} from '../components/library/NotesPanel';
 
 export default function CategoryPage() {
   const { category, subPath, article } = useParams<{
@@ -70,7 +76,6 @@ export default function CategoryPage() {
     if (Number.isFinite(articleId)) {
       return resources.find((r) => r.id === articleId) ?? null;
     }
-    // Fallback for slug-based URLs (not generated, but kept for compatibility)
     const expected = `${article}.md`;
     return resources.find((r) => r.relPath === expected || r.relPath === article) ?? null;
   }, [article, resources]);
@@ -87,6 +92,24 @@ export default function CategoryPage() {
     }
   }, [selectedResource, selectResource]);
 
+  // 切换资源时加载对应笔记
+  const loadNotes = useNotesStore((s) => s.load);
+  const clearNotes = useNotesStore((s) => s.clear);
+  const notes = useNotesStore((s) => s.notes);
+  const createNote = useNotesStore((s) => s.create);
+
+  useEffect(() => {
+    if (selectedResource) {
+      void loadNotes(selectedResource.id);
+    } else {
+      clearNotes();
+    }
+  }, [selectedResource, loadNotes, clearNotes]);
+
+  // 双向定位的 ref 桥
+  const readerRef = useRef<MarkdownReaderHandle>(null);
+  const notesPanelRef = useRef<NotesPanelHandle>(null);
+
   const handleSelectSub = (path: string) => {
     if (!category) return;
     const sub = path.startsWith(`${category}/`) ? path.slice(category.length + 1) : path;
@@ -97,7 +120,6 @@ export default function CategoryPage() {
     if (!category || !currentSub) return;
     const r = resources.find((x) => x.id === id);
     if (!r) return;
-    // Use resource id in the URL — format-agnostic (works for .md, .docx, .pptx, .pdf)
     navigate(`/library/${category}/${currentSub.path.slice(category.length + 1)}/${r.id}`);
   };
 
@@ -139,7 +161,7 @@ export default function CategoryPage() {
         </div>
       </div>
 
-      {/* Right column: reader or placeholder */}
+      {/* Middle: reader */}
       <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
         {selectedResource ? (
           <>
@@ -155,41 +177,63 @@ export default function CategoryPage() {
                 }
               }}
             />
-            <div className="flex-1 overflow-auto">
-              {resourceContent ? (
-                <>
-                  {resourceContent.type === 'markdown' && (
-                    <MarkdownReader html={resourceContent.html} />
-                  )}
-                  {resourceContent.type === 'pdf' && (
-                    <PdfReader
-                      pages={resourceContent.pages}
-                      pageCount={resourceContent.pageCount}
-                    />
-                  )}
-                  {resourceContent.type === 'docx' && (
-                    <DocxReader
-                      blocks={resourceContent.blocks}
-                      wordCount={resourceContent.wordCount}
-                    />
-                  )}
-                  {resourceContent.type === 'pptx' && (
-                    <PptxReader
-                      slides={resourceContent.slides}
-                      slideCount={resourceContent.slideCount}
-                    />
-                  )}
-                </>
-              ) : (
-                <div className="m-4 flex items-start gap-2 rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-700">
-                  <AlertCircle size={16} className="mt-0.5 shrink-0" />
-                  <div>
-                    <div className="font-medium">无法读取：{selectedResource.title}</div>
-                    <div className="mt-1 text-xs text-red-600">
-                      {error ?? '请尝试刷新索引或更换文件'}
+            <div className="flex flex-1 overflow-hidden">
+              <div className="flex-1 min-h-0 overflow-hidden">
+                {resourceContent ? (
+                  <>
+                    {resourceContent.type === 'markdown' && (
+                      <MarkdownReader
+                        ref={readerRef}
+                        html={resourceContent.html}
+                        notes={notes}
+                        onMarkClick={(id) => notesPanelRef.current?.focusNote(id)}
+                        onAddNoteAtSelection={async ({ anchorText, anchorOccurrence }) => {
+                          const note = await createNote({
+                            content: anchorText, // 默认内容 = 选中的文字，方便用户继续编辑
+                            anchorText,
+                            anchorOccurrence,
+                          });
+                          // create 后 store 已更新；下一次渲染会自动高亮新 mark
+                          void note;
+                        }}
+                      />
+                    )}
+                    {resourceContent.type === 'pdf' && (
+                      <PdfReader
+                        pages={resourceContent.pages}
+                        pageCount={resourceContent.pageCount}
+                      />
+                    )}
+                    {resourceContent.type === 'docx' && (
+                      <DocxReader
+                        blocks={resourceContent.blocks}
+                        wordCount={resourceContent.wordCount}
+                      />
+                    )}
+                    {resourceContent.type === 'pptx' && (
+                      <PptxReader
+                        slides={resourceContent.slides}
+                        slideCount={resourceContent.slideCount}
+                      />
+                    )}
+                  </>
+                ) : (
+                  <div className="m-4 flex items-start gap-2 rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-700">
+                    <AlertCircle size={16} className="mt-0.5 shrink-0" />
+                    <div>
+                      <div className="font-medium">无法读取：{selectedResource.title}</div>
+                      <div className="mt-1 text-xs text-red-600">
+                        {error ?? '请尝试刷新索引或更换文件'}
+                      </div>
                     </div>
                   </div>
-                </div>
+                )}
+              </div>
+              {selectedResource && (
+                <NotesPanel
+                  ref={notesPanelRef}
+                  onAnchorClick={(id) => readerRef.current?.scrollToAnchor(id)}
+                />
               )}
             </div>
           </>

@@ -84,15 +84,20 @@ pub fn scan(db: &Db, cfg: &ScanConfig) -> Result<ScanSummary> {
         // 资源
         let ext = path.extension().and_then(|s| s.to_str()).unwrap_or("");
         let Some(r#type) = classify_type(ext) else { continue };
-        // docx/pptx 是 zip 容器，校验 magic bytes；不合法视为损坏
+        // 一次性读出文件内容（docx/pptx 顺便校验 magic bytes，markdown 顺便抽 H1 标题）
+        let file_bytes = match std::fs::read(path) {
+            Ok(b) => b,
+            Err(e) => {
+                eprintln!("[scanner] read failed {}: {e:#}", path.display());
+                errors += 1;
+                continue;
+            }
+        };
         if matches!(r#type, "docx" | "pptx") {
-            match std::fs::read(path) {
-                Ok(bytes) if bytes.len() >= 4 && &bytes[..4] == b"PK\x03\x04" => {}
-                Ok(_) | Err(_) => {
-                    eprintln!("[scanner] corrupt {}: {}", r#type, path.display());
-                    errors += 1;
-                    continue;
-                }
+            if file_bytes.len() < 4 || &file_bytes[..4] != b"PK\x03\x04" {
+                eprintln!("[scanner] corrupt {}: {}", r#type, path.display());
+                errors += 1;
+                continue;
             }
         }
         let parent_cat = rel
@@ -106,19 +111,25 @@ pub fn scan(db: &Db, cfg: &ScanConfig) -> Result<ScanSummary> {
         cat_paths.insert(parent_cat.clone());
         cat_titles.entry(parent_cat.clone()).or_insert((None, parse_sort_order(&parent_cat)));
         let rel_path = file_name.to_string();
-        let title = path
+        let stem = path
             .file_stem()
             .and_then(|s| s.to_str())
             .unwrap_or(&rel_path)
             .to_string();
+        // markdown 文件：从首个 H1 派生标题，便于中文显示；其他格式仍用文件名
+        let title = if r#type == "markdown" {
+            std::str::from_utf8(&file_bytes)
+                .ok()
+                .and_then(first_h1)
+                .unwrap_or(stem)
+        } else {
+            stem
+        };
         let size = entry.metadata().map(|m| m.len() as i64).unwrap_or(0);
-        let hash = match sha256_file(path) {
-            Ok(h) => h,
-            Err(e) => {
-                eprintln!("[scanner] hash failed for {}: {e:#}", path.display());
-                errors += 1;
-                continue;
-            }
+        let hash = {
+            let mut hasher = Sha256::new();
+            hasher.update(&file_bytes);
+            hex::encode(hasher.finalize())
         };
         per_cat_resources
             .entry(parent_cat)
@@ -225,9 +236,3 @@ fn humanize_dir_name(path: &str) -> String {
         .join(" ")
 }
 
-fn sha256_file(path: &Path) -> Result<String> {
-    let bytes = std::fs::read(path).with_context(|| format!("read {}", path.display()))?;
-    let mut hasher = Sha256::new();
-    hasher.update(&bytes);
-    Ok(hex::encode(hasher.finalize()))
-}

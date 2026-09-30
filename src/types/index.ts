@@ -70,3 +70,28 @@ export interface ScanProgress {
   total: number;
   currentPath?: string;
 }
+
+// === Phase 3: notes ===
+export interface Note {
+  id: number;
+  resourceId: number;
+  content: string;
+  anchorText: string | null;
+  anchorOccurrence: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface NewNoteInput {
+  resourceId: number;
+  content: string;
+  anchorText: string | null;
+  anchorOccurrence: number;
+}
+
+export interface NoteUpdateInput {
+  id: number;
+  content: string;
+  anchorText: string | null;
+  anchorOccurrence: number;
+}

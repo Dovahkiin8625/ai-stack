@@ -1,11 +1,11 @@
 //! Tauri 命令入口
-use crate::db::{Db, ResourceRow};
+use crate::db::{Db, NoteRow, ResourceRow};
 use crate::reader::{self, ResourceContent};
 use crate::scanner::{self, ScanConfig, ScanSummary};
 use anyhow::Context;
-use serde::Serialize;
+use serde::{Deserialize, Serialize};
 use std::path::PathBuf;
-use tauri::{AppHandle, Emitter, Manager, State};
+use tauri::{AppHandle, Emitter, Manager};
 
 /// 跨命令共享的不可变路径配置。
 /// 在 setup 阶段初始化一次；每个命令按需 `clone`。
@@ -70,6 +70,50 @@ impl From<ResourceRow> for ResourceDto {
             word_count: r.word_count,
         }
     }
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteDto {
+    pub id: i64,
+    pub resource_id: i64,
+    pub content: String,
+    pub anchor_text: Option<String>,
+    pub anchor_occurrence: i64,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+impl From<NoteRow> for NoteDto {
+    fn from(n: NoteRow) -> Self {
+        Self {
+            id: n.id,
+            resource_id: n.resource_id,
+            content: n.content,
+            anchor_text: n.anchor_text,
+            anchor_occurrence: n.anchor_occurrence,
+            created_at: n.created_at,
+            updated_at: n.updated_at,
+        }
+    }
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NotePayload {
+    pub resource_id: i64,
+    pub content: String,
+    pub anchor_text: Option<String>,
+    pub anchor_occurrence: i64,
+}
+
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct NoteUpdatePayload {
+    pub id: i64,
+    pub content: String,
+    pub anchor_text: Option<String>,
+    pub anchor_occurrence: i64,
 }
 
 #[tauri::command]
@@ -148,6 +192,50 @@ pub fn read_resource(id: i64, app: AppHandle) -> Result<ResourceContent, String>
         .map_err(|e| format!("resource {id} not found: {e}"))?;
     let abs = reader::resolve_absolute(&state.knowledge_root, &category_path, &rel_path);
     reader::read(&abs, &kind).map_err(|e| format!("read {}: {e:#}", abs.display()))
+}
+
+#[tauri::command]
+pub fn list_notes(resource_id: i64, app: AppHandle) -> Result<Vec<NoteDto>, String> {
+    let state: tauri::State<AppState> = app.state();
+    let db = Db::open(&state.db_path).map_err(|e| e.to_string())?;
+    db.list_notes(resource_id)
+        .map(|rows| rows.into_iter().map(NoteDto::from).collect())
+        .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn create_note(payload: NotePayload, app: AppHandle) -> Result<NoteDto, String> {
+    let state: tauri::State<AppState> = app.state();
+    let db = Db::open(&state.db_path).map_err(|e| e.to_string())?;
+    db.insert_note(
+        payload.resource_id,
+        payload.content.trim(),
+        payload.anchor_text.as_deref(),
+        payload.anchor_occurrence,
+    )
+    .map(NoteDto::from)
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn update_note(payload: NoteUpdatePayload, app: AppHandle) -> Result<NoteDto, String> {
+    let state: tauri::State<AppState> = app.state();
+    let db = Db::open(&state.db_path).map_err(|e| e.to_string())?;
+    db.update_note(
+        payload.id,
+        payload.content.trim(),
+        payload.anchor_text.as_deref(),
+        payload.anchor_occurrence,
+    )
+    .map(NoteDto::from)
+    .map_err(|e| e.to_string())
+}
+
+#[tauri::command]
+pub fn delete_note(id: i64, app: AppHandle) -> Result<(), String> {
+    let state: tauri::State<AppState> = app.state();
+    let db = Db::open(&state.db_path).map_err(|e| e.to_string())?;
+    db.delete_note(id).map_err(|e| e.to_string())
 }
 
 /// 在 setup 阶段调用，创建 AppState 并注册到 Tauri。
