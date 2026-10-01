@@ -1,5 +1,5 @@
-import { forwardRef, useImperativeHandle, useRef, useState } from 'react';
-import { MessageSquarePlus, Pencil, Trash2, X, Check, StickyNote } from 'lucide-react';
+import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
+import { MessageSquarePlus, Pencil, Trash2, X, Check, StickyNote, Sparkles } from 'lucide-react';
 import type { Note } from '../../types';
 import { useNotesStore } from '../../stores/notes';
 
@@ -28,6 +28,8 @@ const NotesPanel = forwardRef<NotesPanelHandle, Props>(function NotesPanel({ onA
   const create = useNotesStore((s) => s.create);
   const update = useNotesStore((s) => s.update);
   const remove = useNotesStore((s) => s.remove);
+  const panelOpen = useNotesStore((s) => s.panelOpen);
+  const setPanelOpen = useNotesStore((s) => s.setPanelOpen);
 
   const [composer, setComposer] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);
@@ -48,6 +50,21 @@ const NotesPanel = forwardRef<NotesPanelHandle, Props>(function NotesPanel({ onA
       }, 1400);
     },
   }));
+
+  // 抽屉打开时 focus composer
+  useEffect(() => {
+    if (panelOpen) composerRef.current?.focus();
+  }, [panelOpen]);
+
+  // Escape 关闭抽屉
+  useEffect(() => {
+    if (!panelOpen) return;
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') setPanelOpen(false);
+    };
+    window.addEventListener('keydown', onKey);
+    return () => window.removeEventListener('keydown', onKey);
+  }, [panelOpen, setPanelOpen]);
 
   const handleAdd = async () => {
     const content = composer.trim();
@@ -70,23 +87,41 @@ const NotesPanel = forwardRef<NotesPanelHandle, Props>(function NotesPanel({ onA
     if (!content) return;
     const target = notes.find((n) => n.id === editingId);
     if (!target) return;
+    // AI 笔记被用户编辑后降级为用户笔记——不再展示 AI 标识。
+    // 用户笔记保持不变，避免无意义的 source 字段写回。
+    const source = target.source === 'ai' ? 'user' : undefined;
     await update(editingId, {
       content,
       anchorText: target.anchorText,
       anchorOccurrence: target.anchorOccurrence,
+      source,
     });
     setEditingId(null);
     setEditingDraft('');
   };
 
   return (
-    <div className="flex h-full w-[320px] shrink-0 flex-col border-l border-border bg-surface">
+    <aside
+      aria-label="笔记"
+      aria-hidden={!panelOpen}
+      className={`fixed right-0 top-14 bottom-0 z-30 flex w-[320px] flex-col border-l border-border bg-surface shadow-[-4px_0_12px_rgba(0,0,0,0.04)] transition-transform duration-200 ease-out motion-reduce:transition-none ${
+        panelOpen ? 'translate-x-0' : 'pointer-events-none translate-x-full'
+      }`}
+    >
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
         <StickyNote size={16} className="text-accent" />
         <span className="text-sm font-medium">笔记</span>
         <span className="ml-auto text-xs text-text-muted">
           {notes.length} 条
         </span>
+        <button
+          type="button"
+          onClick={() => setPanelOpen(false)}
+          aria-label="关闭笔记面板"
+          className="rounded p-1 text-text-muted hover:bg-surface-2 hover:text-text"
+        >
+          <X size={14} />
+        </button>
       </div>
 
       <div className="flex-1 overflow-y-auto px-3 py-3">
@@ -130,13 +165,41 @@ const NotesPanel = forwardRef<NotesPanelHandle, Props>(function NotesPanel({ onA
                         rows={3}
                         autoFocus
                       />
+                    ) : n.source === 'ai' && n.content === '' ? (
+                      // AI 讲解占位卡片：在首个 chunk 到达前（含 extended thinking
+                      // 与网络往返）显示友好动画，避免用户误以为卡住。
+                      // 首个 appendToNote 写入非空内容后会自然切回正常 <p>。
+                      <div
+                        className="flex items-center gap-2 py-0.5 text-text-muted"
+                        role="status"
+                        aria-live="polite"
+                      >
+                        <Sparkles size={14} className="animate-pulse text-accent" />
+                        <span className="text-xs">AI 正在讲解</span>
+                        <span className="flex gap-0.5" aria-hidden>
+                          <span className="h-1 w-1 animate-bounce rounded-full bg-text-muted [animation-delay:0ms]" />
+                          <span className="h-1 w-1 animate-bounce rounded-full bg-text-muted [animation-delay:150ms]" />
+                          <span className="h-1 w-1 animate-bounce rounded-full bg-text-muted [animation-delay:300ms]" />
+                        </span>
+                      </div>
                     ) : (
                       <p className="whitespace-pre-wrap break-words text-text">
                         {n.content}
                       </p>
                     )}
                     <div className="mt-1.5 flex items-center justify-between text-[11px] text-text-muted">
-                      <span>{formatTime(n.updatedAt)}</span>
+                      <div className="flex items-center gap-1.5">
+                        <span>{formatTime(n.updatedAt)}</span>
+                        {n.source === 'ai' && (
+                          <span
+                            className="inline-flex items-center gap-0.5 rounded bg-accent/10 px-1.5 py-0.5 text-[10px] font-medium text-accent"
+                            title="由 AI 生成"
+                          >
+                            <Sparkles size={10} />
+                            AI
+                          </span>
+                        )}
+                      </div>
                       <div className="flex items-center gap-1 opacity-0 transition-opacity group-hover:opacity-100">
                         {editingId === n.id ? (
                           <>
@@ -216,7 +279,7 @@ const NotesPanel = forwardRef<NotesPanelHandle, Props>(function NotesPanel({ onA
           </button>
         </div>
       </div>
-    </div>
+    </aside>
   );
 });
 

@@ -12,9 +12,9 @@
 
 智能体的目标是学习**策略** $\pi(a|s)$，最大化期望累计折扣奖励：
 
-```math
+$$
 J(\pi) = \mathbb{E}_\tau\!\left[ \sum_{t=0}^{\infty} \gamma^t r(s_t, a_t) \right],\quad \tau = (s_0, a_0, s_1, a_1, \dots)
-```
+$$
 
 **Markov 性**：下一状态只依赖当前 $(s, a)$，与历史无关。
 
@@ -31,43 +31,43 @@ obs, reward, terminated, truncated, info = env.step(action)
 
 **状态价值函数**：从状态 $s$ 出发、按策略 $\pi$ 行动的期望累计奖励：
 
-```math
+$$
 V^\pi(s) = \mathbb{E}_\pi\!\left[ \sum_{t=0}^\infty \gamma^t r(s_t, a_t) \,\Big|\, s_0 = s \right]
-```
+$$
 
 **动作价值函数**：从状态 $s$ 出发、先执行 $a$、再按 $\pi$：
 
-```math
+$$
 Q^\pi(s, a) = \mathbb{E}_\pi\!\left[ \sum_{t=0}^\infty \gamma^t r(s_t, a_t) \,\Big|\, s_0 = s, a_0 = a \right]
-```
+$$
 
 两者关系：
 
-```math
+$$
 Q^\pi(s, a) = r(s, a) + \gamma \mathbb{E}_{s' \sim P}\!\left[ V^\pi(s') \right]
-```
+$$
 
-```math
+$$
 V^\pi(s) = \mathbb{E}_{a \sim \pi}\!\left[ Q^\pi(s, a) \right]
-```
+$$
 
 **贝尔曼期望方程**给出递归关系：
 
-```math
+$$
 V^\pi(s) = \sum_a \pi(a|s) \!\left[ r(s,a) + \gamma \sum_{s'} P(s'|s,a) V^\pi(s') \right]
-```
+$$
 
 **最优价值函数**：
 
-```math
+$$
 V^*(s) = \max_\pi V^\pi(s),\quad Q^*(s, a) = \max_\pi Q^\pi(s, a)
-```
+$$
 
 满足**贝尔曼最优方程**：
 
-```math
+$$
 V^*(s) = \max_a \!\left[ r(s,a) + \gamma \mathbb{E}_{s'}\!\left[ V^*(s') \right] \right]
-```
+$$
 
 ## 三、动态规划：基于模型的解法
 
@@ -77,9 +77,9 @@ V^*(s) = \max_a \!\left[ r(s,a) + \gamma \mathbb{E}_{s'}\!\left[ V^*(s') \right]
 
 **价值迭代**：直接迭代贝尔曼最优方程：
 
-```math
+$$
 V_{k+1}(s) = \max_a\!\left[ r(s,a) + \gamma \sum_{s'} P(s'|s,a) V_k(s') \right]
-```
+$$
 
 复杂度都是 $O(|\mathcal{S}|^2 |\mathcal{A}|)$，**只能用于小状态空间**（如棋盘游戏）。
 
@@ -91,17 +91,17 @@ V_{k+1}(s) = \max_a\!\left[ r(s,a) + \gamma \sum_{s'} P(s'|s,a) V_k(s') \right]
 
 **蒙特卡洛（Monte Carlo）**：跑完一整条轨迹，用实际回报估计：
 
-```math
+$$
 V(s) \leftarrow V(s) + \alpha\,[G_t - V(s)]
-```
+$$
 
 $G_t = \sum_{k=t}^T \gamma^{k-t} r_k$。**无偏但方差大**。
 
 **时序差分（TD）**：用单步奖励 + 估计的下一步价值：
 
-```math
+$$
 V(s) \leftarrow V(s) + \alpha\,[r + \gamma V(s') - V(s)]
-```
+$$
 
 **有偏差（bootstrapping）但方差小**。
 
@@ -111,9 +111,9 @@ V(s) \leftarrow V(s) + \alpha\,[r + \gamma V(s') - V(s)]
 
 直接学 $Q(s, a)$：
 
-```math
+$$
 Q(s, a) \leftarrow Q(s, a) + \alpha\!\left[ r + \gamma \max_{a'} Q(s', a') - Q(s, a) \right]
-```
+$$
 
 **off-policy**——评估策略可以是 $\epsilon$-greedy 但更新时假设 max。这是 **Deep Q-Network (DQN)** 的基础。
 
@@ -150,21 +150,21 @@ def train_dqn():
 
 有些任务动作空间连续或极大（如机器人控制），价值函数难求，直接参数化策略：
 
-```math
+$$
 \pi_\theta(a|s) \;\text{是一个神经网络},\quad \theta \text{ 是参数}
-```
+$$
 
 **REINFORCE** 目标：
 
-```math
+$$
 J(\theta) = \mathbb{E}_{\tau \sim \pi_\theta}\!\left[ R(\tau) \right],\quad R(\tau) = \sum_t \gamma^t r_t
-```
+$$
 
 策略梯度定理：
 
-```math
+$$
 \nabla_\theta J(\theta) = \mathbb{E}_\tau\!\left[ \sum_t \nabla_\theta \log \pi_\theta(a_t|s_t) \cdot G_t \right]
-```
+$$
 
 直观：让"回报高的动作出现概率变大"，按 $G_t$ 加权。
 
@@ -177,9 +177,9 @@ loss.backward()
 
 **基线（baseline）**：减去 $V(s_t)$ 或平均回报，降低方差：
 
-```math
+$$
 \nabla_\theta J = \mathbb{E}\!\left[ \nabla_\theta \log \pi_\theta(a|s) \cdot (G_t - b(s)) \right]
-```
+$$
 
 $b(s) = V^\pi(s)$ 是常见选择，称为"优势函数" $A(s, a) = Q(s, a) - V(s)$。
 
@@ -190,13 +190,13 @@ $b(s) = V^\pi(s)$ 是常见选择，称为"优势函数" $A(s, a) = Q(s, a) - V(
 - **Actor**：$\pi_\theta(a|s)$，按优势方向更新。
 - **Critic**：$V_\phi(s)$ 或 $Q_\phi(s, a)$，用 TD/蒙特卡洛回归。
 
-```math
+$$
 \theta \leftarrow \theta + \eta \nabla_\theta \log \pi_\theta(a|s) \cdot A(s, a)
-```
+$$
 
-```math
+$$
 \phi \leftarrow \phi - \eta \nabla_\phi (A(s, a))^2 \quad \text{（优势预测的 MSE 损失）}
-```
+$$
 
 **A2C**（Advantage Actor-Critic）：同步版本。
 
@@ -210,9 +210,9 @@ $b(s) = V^\pi(s)$ 是常见选择，称为"优势函数" $A(s, a) = Q(s, a) - V(
 
 **Clipped Surrogate Objective**：
 
-```math
+$$
 L^{\text{CLIP}}(\theta) = \mathbb{E}\!\left[ \min\!\left( r_t(\theta) A_t,\; \text{clip}(r_t(\theta), 1-\epsilon, 1+\epsilon) A_t \right) \right]
-```
+$$
 
 其中 $r_t(\theta) = \frac{\pi_\theta(a_t|s_t)}{\pi_{\theta_{\text{old}}}(a_t|s_t)}$ 是新旧策略概率比。clip 在 $[1-\epsilon, 1+\epsilon]$（如 $\epsilon=0.2$）截断。
 
@@ -266,17 +266,17 @@ def gae(rewards, values, dones, gamma=0.99, lam=0.95):
 2. **奖励模型**（Reward Model）：用人类偏好标注（A vs B 哪个更好）训练一个标量奖励模型 $r_\phi$。
 3. **PPO**：用 $r_\phi$ 作为奖励函数，对 LLM 做 RL 优化。
 
-```math
+$$
 L_{\text{RL}} = \mathbb{E}\!\left[ r_\phi(x, y) - \beta \log \frac{\pi_\theta(y|x)}{\pi_{\text{ref}}(y|x)} \right]
-```
+$$
 
 第二项是**KL 散度正则**，防止 LLM 偏离 SFT 模型太远（防止"奖励黑客"）。
 
 **现代替代**：**DPO**（Direct Preference Optimization）绕过显式奖励模型，直接用偏好数据做监督学习，公式简洁且稳定。
 
-```math
+$$
 L_{\text{DPO}} = -\log \sigma\!\left( \beta \log \frac{\pi_\theta(y_w|x)}{\pi_{\text{ref}}(y_w|x)} - \beta \log \frac{\pi_\theta(y_l|x)}{\pi_{\text{ref}}(y_l|x)} \right)
-```
+$$
 
 其中 $y_w, y_l$ 是人类标注的优选 / 劣选回答。
 

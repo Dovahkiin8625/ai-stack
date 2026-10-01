@@ -38,11 +38,33 @@ export default function ApiKeyForm() {
       </div>
 
       <div>
-        <label className="mb-1 block text-sm font-medium">Model</label>
+        <label className="mb-1 flex items-baseline justify-between text-sm font-medium">
+          <span>轻量模型</span>
+          <span className="text-xs font-normal text-text-muted">
+            用于翻译、摘要等简单任务，不开思维链
+          </span>
+        </label>
         <input
           type="text"
-          value={form.model}
-          onChange={(e) => setForm({ ...form, model: e.target.value })}
+          value={form.lightweightModel}
+          onChange={(e) => setForm({ ...form, lightweightModel: e.target.value })}
+          placeholder="claude-haiku-4-5-..."
+          className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm"
+        />
+      </div>
+
+      <div>
+        <label className="mb-1 flex items-baseline justify-between text-sm font-medium">
+          <span>高性能模型</span>
+          <span className="text-xs font-normal text-text-muted">
+            用于讲解、深度分析等复杂任务
+          </span>
+        </label>
+        <input
+          type="text"
+          value={form.performanceModel}
+          onChange={(e) => setForm({ ...form, performanceModel: e.target.value })}
+          placeholder="claude-sonnet-..."
           className="w-full rounded-md border border-border bg-bg px-3 py-2 text-sm"
         />
       </div>

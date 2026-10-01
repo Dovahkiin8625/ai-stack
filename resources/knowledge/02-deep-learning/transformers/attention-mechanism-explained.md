@@ -63,9 +63,9 @@ Attention：动词位置直接 query 主语位置，一次对齐
 
 最常用的注意力形式是 **Scaled Dot-Product Attention**，定义为：
 
-```math
+$$
 \text{Attention}(Q, K, V) = \text{softmax}\!\left(\frac{Q K^\top}{\sqrt{d_k}}\right) V
-```
+$$
 
 逐项拆解：
 
@@ -96,14 +96,14 @@ Attention：动词位置直接 query 主语位置，一次对齐
 
 **方差分析**（假设 $q, k$ 的每个分量独立、零均值、方差 1）：
 
-```math
+$$
 q_i \cdot k_j = \sum_{l=1}^{d_k} q_{i,l}\, k_{j,l}
-```
+$$
 
-```math
+$$
 \mathbb{E}[q_i \cdot k_j] = 0,\quad
 \text{Var}(q_i \cdot k_j) = d_k
-```
+$$
 
 所以点积的**标准差**是 $\sqrt{d_k}$。当 $d_k = 64$（典型），点积典型值落在 $[-16, 16]$ 量级，进入 softmax 的"饱和区"。
 
@@ -143,13 +143,13 @@ softmax     ~0  ~0  ~0  ~1.0        ← 一个位置接近 one-hot
 
 **形式化**：
 
-```math
+$$
 \text{MultiHead}(Q, K, V) = \text{Concat}(\text{head}_1, \dots, \text{head}_h)\, W^O
-```
+$$
 
-```math
+$$
 \text{head}_i = \text{Attention}(Q W_i^Q,\ K W_i^K,\ V W_i^V)
-```
+$$
 
 **参数量权衡**：把 $d_{\text{model}}$ 维的特征拆成 $h$ 个 $d_k = d_{\text{model}} / h$ 维的头，每个头的 FLOPs 是原来的 $1/h$，但要做 $h$ 次——**总 FLOPs 与单头 $d_{\text{model}}$ 维注意力几乎相同**，却换来了"多种关系"的表示能力。这是计算上"几乎免费"的升级。
 
@@ -166,9 +166,9 @@ softmax     ~0  ~0  ~0  ~1.0        ← 一个位置接近 one-hot
 
 掩码把 softmax 的输入中"不该看"的位置强行置为 $-\infty$，softmax 后概率为 0：
 
-```math
+$$
 \text{masked-softmax}(x)_i = \frac{\exp(x_i + m_i)}{\sum_j \exp(x_j + m_j)},\quad m_i \in \{0,\ -\infty\}
-```
+$$
 
 两类常见掩码：
 

@@ -40,7 +40,7 @@ print(torch.softmax(logits, dim=-1))   # tensor([nan, nan, nan])
 
 标准修复是减去最大值（"max trick"），但更一般也更稳定的写法是 **log-sum-exp**：
 
-```math
+$$
 \text{LSE}(\mathbf{x}) = \log \sum_i e^{x_i} = m + \log \sum_i e^{x_i - m},\quad m = \max_i x_i
 \]
 
@@ -52,7 +52,7 @@ def log_softmax(x):
 
 print(log_softmax(torch.tensor([1000.0, 1001.0, 1002.0])))
 # tensor([-2.4076, -1.4076, -0.4076])
-```
+$$
 
 PyTorch 的 `F.log_softmax`、`cross_entropy` 内部已经做了 log-sum-exp 处理，**不要自己再 softmax 后取 log**——那样既慢又不稳。
 
@@ -81,9 +81,9 @@ print(np.linalg.solve(A, b))      # 看起来正常，但稍微扰动 b 结果�
 
 深层网络中，反向传播是连乘雅可比矩阵：
 
-```math
+$$
 \frac{\partial \mathcal{L}}{\partial \mathbf{h}_1} = \frac{\partial \mathcal{L}}{\partial \mathbf{h}_L} \prod_{\ell=2}^{L} \frac{\partial \mathbf{h}_\ell}{\partial \mathbf{h}_{\ell-1}}
-```
+$$
 
 若每个雅可比的谱范数 $\rho_\ell < 1$，梯度按指数缩小（**消失**）；若 $\rho_\ell > 1$，按指数放大（**爆炸**）。常见缓解手段：
 

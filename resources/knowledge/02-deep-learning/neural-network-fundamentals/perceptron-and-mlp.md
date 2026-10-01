@@ -23,9 +23,9 @@
 
 单层感知机是上面模型的"训练版本"——1958 年 Rosenblatt 提出感知机学习算法，用误分类样本更新权重：
 
-```math
+$$
 y = \sigma(w^\top x + b),\quad w \leftarrow w + \eta\, y (y_{\text{true}} - y)\, x
-```
+$$
 
 其中 $\sigma$ 用阶跃函数（预测 +1 / -1）。它能用**梯度下降**等价的方式收敛——前提是数据线性可分。
 
@@ -85,19 +85,19 @@ y = \sigma(w^\top x + b),\quad w \leftarrow w + \eta\, y (y_{\text{true}} - y)\,
 
 对于一个有 $L$ 个带权层的 MLP，每一层的计算是：
 
-```math
+$$
 z^{(l)} = W^{(l)} a^{(l-1)} + b^{(l)} \quad (\text{预激活})
-```
+$$
 
-```math
+$$
 a^{(l)} = \sigma_l(z^{(l)}) \quad (\text{激活})
-```
+$$
 
 其中 $a^{(0)} = x$，$a^{(L)}$ 是最终输出。整个网络就是这些仿射 + 激活的复合：
 
-```math
+$$
 f(x) = \sigma_L\!\left( W^{(L)} \sigma_{L-1}\!\left( W^{(L-1)} \cdots \sigma_1(W^{(1)} x + b^{(1)}) + b^{(L-1)} \right) + b^{(L)} \right)
-```
+$$
 
 这就是**前向传播（forward pass）**。每一层把上一层表示"投影 + 扭曲"一下，最终给出预测。
 

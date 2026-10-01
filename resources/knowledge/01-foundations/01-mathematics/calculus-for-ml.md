@@ -6,15 +6,15 @@
 
 单变量函数 $f(x)$ 的导数 $f'(x)$ 描述 $f$ 在 $x$ 处的瞬时变化率：
 
-```math
+$$
 f'(x) = \lim_{h \to 0} \frac{f(x+h) - f(x)}{h}
-```
+$$
 
 当函数依赖多个变量时，我们用偏导数 $\partial f / \partial x_i$ 描述在某个坐标方向上的变化率。把所有偏导数拼起来，就是
 
-```math
+$$
 \nabla f = \left( \frac{\partial f}{\partial x_1}, \frac{\partial f}{\partial x_2}, \dots, \frac{\partial f}{\partial x_n} \right)
-```
+$$
 
 这是 ML 中最常见的梯度形式。
 
@@ -24,15 +24,15 @@ f'(x) = \lim_{h \to 0} \frac{f(x+h) - f(x)}{h}
 
 若 $y = f(g(x))$，则
 
-```math
+$$
 \frac{dy}{dx} = \frac{df}{dg} \cdot \frac{dg}{dx}
-```
+$$
 
 多变量版本：若 $\mathbf{y} = f(\mathbf{u}), \mathbf{u} = g(\mathbf{x})$，则
 
-```math
+$$
 \frac{\partial \mathbf{y}}{\partial \mathbf{x}} = \frac{\partial \mathbf{y}}{\partial \mathbf{u}} \cdot \frac{\partial \mathbf{u}}{\partial \mathbf{x}}
-```
+$$
 
 这就是反向传播（Backpropagation）的数学原理。
 
@@ -40,9 +40,9 @@ f'(x) = \lim_{h \to 0} \frac{f(x+h) - f(x)}{h}
 
 梯度下降通过迭代更新参数来最小化损失 $L(\theta)$：
 
-```math
+$$
 \theta_{t+1} = \theta_t - \eta \nabla_\theta L(\theta_t)
-```
+$$
 
 其中 $\eta$ 是学习率。直观上，梯度指向函数上升最快的方向，所以减去梯度就走到了下降最快的方向。
 
@@ -69,9 +69,9 @@ step 20: theta ≈ 2.94, loss ≈ 0.0036
 
 激活函数 $\sigma(x)$ 的导数直接决定反向传播时梯度的"乘子"。一个经典的例子是 sigmoid：
 
-```math
+$$
 \sigma(x) = \frac{1}{1 + e^{-x}}, \quad \sigma'(x) = \sigma(x)(1 - \sigma(x))
-```
+$$
 
 由于 $\sigma'(x) \le 0.25$，梯度经过多层 sigmoid 后会指数级缩小——这就是 sigmoid 深层网络中"梯度消失"的根源之一。ReLU 在正区间导数为常数 1，因此在现代网络中很大程度上缓解了这个问题。GeLU、SwiGLU 等更平滑的替代品则在保持梯度通畅的同时引入轻微非线性。理解这一点，是从"模型能跑"过渡到"模型训得稳"的关键一步。
 

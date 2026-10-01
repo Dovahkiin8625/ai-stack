@@ -66,15 +66,15 @@ def dijkstra(A, src, n):
 
 这个视角直接催生了 **ChebNet** 和 **GCN**：用 $L$ 的多项式截断近似图卷积核，避免显式做特征分解。
 
-```math
+$$
 g_\theta \star x = g_\theta(L) x = U g_\theta(\Lambda) U^\top x
-```
+$$
 
 其中 $U, \Lambda$ 是 $L$ 的特征向量和特征值。GCN 取一阶截断 $g_\theta \approx \theta_0 I + \theta_1 L$，简化后得到著名的传播规则：
 
-```math
+$$
 H^{(l+1)} = \sigma(\hat{A} H^{(l)} W^{(l)}),\quad \hat{A} = \tilde{D}^{-1/2} \tilde{A} \tilde{D}^{-1/2}
-```
+$$
 
 其中 $\tilde{A} = A + I$ 加自环，$\tilde{D}$ 是其度矩阵。
 
@@ -82,9 +82,9 @@ H^{(l+1)} = \sigma(\hat{A} H^{(l)} W^{(l)}),\quad \hat{A} = \tilde{D}^{-1/2} \ti
 
 现代 GNN（GraphSAGE、GAT、消息传递神经网络 MPNN）都可以用**消息传递**框架描述：
 
-```math
+$$
 \mathbf{h}_v^{(l+1)} = \mathrm{UPDATE}^{(l)}\!\left( \mathbf{h}_v^{(l)},\; \mathrm{AGG}^{(l)}\!\left( \{\mathbf{h}_u^{(l)} : u \in \mathcal{N}(v)\} \right) \right)
-```
+$$
 
 两步：
 

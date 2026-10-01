@@ -10,31 +10,31 @@ LSTM（Long Short-Term Memory）的解法是引入一个**额外的"细胞状态
 
 LSTM 在每个时间步 $t$ 同时维护两个状态：隐状态 $h_t$（对外输出）和细胞状态 $c_t$（长期记忆）。三个**门**控制信息的写入、保留和读出：
 
-```math
+$$
 f_t \;=\; \sigma\!\left( W_f\, [h_{t-1}, x_t] + b_f \right) \quad \text{(遗忘门)}
-```
+$$
 
-```math
+$$
 i_t \;=\; \sigma\!\left( W_i\, [h_{t-1}, x_t] + b_i \right) \quad \text{(输入门)}
-```
+$$
 
-```math
+$$
 \tilde{c}_t \;=\; \tanh\!\left( W_c\, [h_{t-1}, x_t] + b_c \right) \quad \text{(候选记忆)}
-```
+$$
 
-```math
+$$
 o_t \;=\; \sigma\!\left( W_o\, [h_{t-1}, x_t] + b_o \right) \quad \text{(输出门)}
-```
+$$
 
 更新细胞状态和隐状态：
 
-```math
+$$
 c_t \;=\; f_t \odot c_{t-1} \;+\; i_t \odot \tilde{c}_t
-```
+$$
 
-```math
+$$
 h_t \;=\; o_t \odot \tanh(c_t)
-```
+$$
 
 其中 $\sigma$ 是 sigmoid（输出 $[0,1]$，作为"比例系数"），$\odot$ 是逐元素乘。
 
@@ -77,21 +77,21 @@ h_t \;=\; o_t \odot \tanh(c_t)
 
 **Gated Recurrent Unit (Cho et al. 2014)** 把 LSTM 的三个门合并成两个，移除独立的细胞状态：
 
-```math
+$$
 z_t \;=\; \sigma\!\left( W_z\, [h_{t-1}, x_t] \right) \quad \text{(更新门)}
-```
+$$
 
-```math
+$$
 r_t \;=\; \sigma\!\left( W_r\, [h_{t-1}, x_t] \right) \quad \text{(重置门)}
-```
+$$
 
-```math
+$$
 \tilde{h}_t \;=\; \tanh\!\left( W_h\, [r_t \odot h_{t-1},\, x_t] \right) \quad \text{(候选)}
-```
+$$
 
-```math
+$$
 h_t \;=\; (1 - z_t) \odot h_{t-1} \;+\; z_t \odot \tilde{h}_t
-```
+$$
 
 直觉：
 

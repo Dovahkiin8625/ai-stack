@@ -29,9 +29,9 @@
 
 BERT（Devlin et al., 2018）随机遮住 15% 的 token，让模型根据**左右上下文**预测被遮住的词：
 
-```math
+$$
 \mathcal{L}_{\text{MLM}} = -\sum_{i \in \text{masked}} \log P(x_i \mid x_{\setminus M})
-```
+$$
 
 注意**双向**：位置 $i$ 同时看到左边和右边的 token。这是与 GPT 最大的区别——也是 BERT 擅长理解、不擅长生成的根本原因。
 
@@ -78,9 +78,9 @@ BERT（Devlin et al., 2018）随机遮住 15% 的 token，让模型根据**左�
 
 GPT 系列只做一件事——给定前 $t-1$ 个 token，预测第 $t$ 个：
 
-```math
+$$
 \mathcal{L}_{\text{CLM}} = -\sum_{t=1}^{T} \log P(x_t \mid x_{<t})
-```
+$$
 
 ```text
 输入:   我  爱  NLP

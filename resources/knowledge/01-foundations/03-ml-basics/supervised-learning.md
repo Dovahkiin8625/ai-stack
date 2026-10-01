@@ -4,9 +4,9 @@
 
 几乎所有监督学习算法都可以写成三段式：
 
-```math
+$$
 \text{模型} \; f_\theta(x) \quad + \quad \text{损失} \; L(y, f_\theta(x)) \quad \xrightarrow{\min_\theta} \quad \text{优化器} \; (\text{SGD/Adam/闭式解})
-```
+$$
 
 不同算法的差异只在于：
 
@@ -22,15 +22,15 @@
 
 **损失**：均方误差（MSE）
 
-```math
+$$
 L(\theta) = \frac{1}{N}\sum_{i=1}^{N} (w^\top x_i + b - y_i)^2
-```
+$$
 
 **闭式解**：
 
-```math
+$$
 \theta^* = (X^\top X)^{-1} X^\top y
-```
+$$
 
 实践中很少直接求逆（$O(d^3)$），而是用 QR 分解或 SVD（数值更稳）。
 
@@ -51,9 +51,9 @@ print(model.coef_, model.intercept_)
 
 **损失**：交叉熵
 
-```math
+$$
 L(\theta) = -\frac{1}{N}\sum_{i=1}^{N}\!\left[ y_i \log \hat{y}_i + (1-y_i)\log(1-\hat{y}_i) \right]
-```
+$$
 
 逻辑回归虽然名字带"回归"，其实是分类——把线性输出过 sigmoid 后看作"正类概率"。多分类版本是 softmax 回归，输出 $K$ 个互斥概率。
 
@@ -73,17 +73,17 @@ print(clf.predict_proba(X_test[:3]))  # 输出每个类别的概率
 
 支持向量机寻找一个**超平面**，使两类样本到超平面的最小距离（间隔）最大。线性可分时：
 
-```math
+$$
 \min_{w, b} \; \frac{1}{2}\|w\|^2 \quad \text{s.t.} \quad y_i (w^\top x_i + b) \ge 1
-```
+$$
 
 KKT 条件指出，多数样本 $\alpha_i = 0$（非支持向量），只有"边缘"样本 $\alpha_i > 0$ 影响决策。这正是 SVM 高效的根源。
 
 **核技巧**：把数据映射到高维空间再做线性分类，避免显式升维：
 
-```math
+$$
 K(x_i, x_j) = \phi(x_i)^\top \phi(x_j)
-```
+$$
 
 常用核：
 

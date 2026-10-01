@@ -79,10 +79,10 @@ VGG（Visual Geometry Group, Oxford）的洞察：**两个 3×3 卷积堆叠的�
 
 参数对比：
 
-```math
+$$
 5\times5 \text{ conv on C channels}: \quad 25 C^2 \text{ params}
 \text{两个 } 3\times3 \text{ conv on C channels}: \quad 2 \times 9 C^2 = 18 C^2 \text{ params}
-```
+$$
 
 3 个 3×3 卷积 = 一个 7×7，但参数只有 $27C^2$ vs $49C^2$，还多两次非线性激活。
 
@@ -144,9 +144,9 @@ GoogLeNet 共 22 层（含辅助分类头），但参数只有约 5M——比 Al
 
 He 等人 2015 年的核心洞察：**让网络学习"残差"$F(x) = H(x) - x$，而不是直接学 $H(x)$**。前向传播变成：
 
-```math
+$$
 y = F(x, \{W_i\}) + x
-```
+$$
 
 其中 $F$ 是两到三个卷积层堆叠，$x$ 是恒等映射（**shortcut / skip connection**）。
 

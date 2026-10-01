@@ -21,9 +21,9 @@
 
 把参数"大小"加入损失函数：
 
-```math
+$$
 L_{\text{reg}}(\theta) = L(\theta) + \lambda \cdot \Omega(\theta)
-```
+$$
 
 **L2 正则（Ridge / Weight Decay）**：$\Omega(\theta) = \|\theta\|_2^2$。
 
@@ -58,9 +58,9 @@ optimizer = torch.optim.AdamW(
 
 训练时每个神经元以概率 $p$ 被置零：
 
-```math
+$$
 \mathbf{h}^{(l)} = \sigma(W^{(l)} \cdot (\mathbf{m}^{(l)} \odot \mathbf{h}^{(l-1)}) + b^{(l)})
-```
+$$
 
 其中 $\mathbf{m}^{(l)} \sim \text{Bernoulli}(1-p)$。
 
@@ -126,16 +126,16 @@ for epoch in range(max_epochs):
 
 **Mixup** 把两张图按 $\lambda$ 线性混合，标签也按 $\lambda$ 混合：
 
-```math
+$$
 \tilde{x} = \lambda x_i + (1-\lambda) x_j,\quad
 \tilde{y} = \lambda y_i + (1-\lambda) y_j
-```
+$$
 
 **Label Smoothing**：把 one-hot 标签 $[0, 1, 0]$ 替换为带均匀噪声的软标签：
 
-```math
+$$
 y^{\text{LS}}_i = (1 - \epsilon) \cdot y_i + \epsilon / K
-```
+$$
 
 阻止模型过度自信、提升校准度，对图像分类与语言模型都极有效：
 
@@ -149,9 +149,9 @@ loss = F.cross_entropy(logits, target, label_smoothing=0.1)
 - **Adversarial Training**（FGSM / PGD）：用梯度构造最坏扰动，提升鲁棒性。
 - **SAM（Sharpness-Aware Minimization）**：寻找损失平坦极小值，$\min_\theta \max_{\|\epsilon\| \le \rho} L(\theta + \epsilon)$。
 
-```math
+$$
 \min_\theta \max_{\|\epsilon\| \le \rho} L(\theta + \epsilon)
-```
+$$
 
 ## 七、归一化：控制层间分布漂移
 
@@ -159,10 +159,10 @@ loss = F.cross_entropy(logits, target, label_smoothing=0.1)
 
 **Batch Normalization（BN）**：在 batch 维度上做归一化，是 CNN 的标配：
 
-```math
+$$
 \hat{x} = \frac{x - \mu_B}{\sqrt{\sigma_B^2 + \epsilon}},\quad
 y = \gamma \hat{x} + \beta
-```
+$$
 
 $\mu_B$、$\sigma_B^2$ 是当前 mini-batch 上每个通道的均值与方差，$\gamma$、$\beta$ 是可学习缩放/偏移。
 
@@ -175,9 +175,9 @@ nn.BatchNorm2d(num_features)   # (B, C, H, W)
 
 **Layer Normalization（LN）**：在特征维度上做归一化，**不依赖 batch**，Transformer 的标配：
 
-```math
+$$
 \hat{x} = \frac{x - \mu_L}{\sqrt{\sigma_L^2 + \epsilon}},\quad y = \gamma \hat{x} + \beta
-```
+$$
 
 $\mu_L$、$\sigma_L^2$ 是对**单个样本的所有特征**求均值方差。
 

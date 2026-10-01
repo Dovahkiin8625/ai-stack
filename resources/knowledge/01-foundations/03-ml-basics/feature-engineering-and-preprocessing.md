@@ -15,9 +15,9 @@
 
 ### 处理策略
 
-```math
+$$
 \text{删除} \;\; | \;\; \text{填充（均值/中位数/众数/0/前后值/KNN/模型预测）} \;\; | \;\; \text{单独建模"缺失"作为特征}
-```
+$$
 
 ```python
 import numpy as np, pandas as pd
@@ -98,9 +98,9 @@ df = pd.get_dummies(df, columns=['city'], drop_first=True)
 
 **Target Encoding**（也称 Mean Encoding）：
 
-```math
+$$
 \text{enc}(c) = \frac{\sum_{i: x_i = c} y_i}{\text{count}(c)}
-```
+$$
 
 用每个类别的目标均值代替类别 ID。**关键：要做 CV/折叠编码**，否则泄漏训练标签导致过拟合。
 
@@ -113,9 +113,9 @@ X_train_enc = te.transform(X_train)
 
 **Count Encoding** / **Frequency Encoding**：
 
-```math
+$$
 \text{enc}(c) = \text{count}(\{i: x_i = c\})
-```
+$$
 
 **Hash Encoding**（Hashing Trick）：把高维稀疏类别哈希到固定维度（如 $2^{10}$），适合超大规模类别。
 
@@ -158,9 +158,9 @@ X_test  = scaler.transform(X_test)        # 用同一组参数
 
 **1. 数值变换**：
 
-```math
+$$
 \log x,\;\; \sqrt{x},\;\; x^2,\;\; x_1 \cdot x_2,\;\; x_1 / x_2
-```
+$$
 
 **2. 时间特征**：
 
@@ -207,9 +207,9 @@ df['city_product'] = df['city'].astype(str) + '_' + df['product'].astype(str)
 
 按统计指标打分，与模型无关：
 
-```math
+$$
 \text{相关系数} \;\; | \;\; \chi^2 \;\; | \;\; \text{互信息} \;\; | \;\; \text{方差}
-```
+$$
 
 ```python
 from sklearn.feature_selection import SelectKBest, mutual_info_classif

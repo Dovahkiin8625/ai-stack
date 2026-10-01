@@ -4,9 +4,9 @@
 
 一般优化问题可以写成：
 
-```math
+$$
 \min_{\mathbf{x} \in \mathcal{X}} \; f(\mathbf{x}) \quad \text{s.t.} \quad g_i(\mathbf{x}) \le 0,\; h_j(\mathbf{x}) = 0
-```
+$$
 
 其中 $f$ 是目标函数，$g_i$ 是不等式约束，$h_j$ 是等式约束，$\mathcal{X}$ 是变量的可行域。机器学习中 $\mathbf{x}$ 通常是模型参数 $\theta$，$f$ 是经验风险 $\frac{1}{N}\sum_{i=1}^N \ell(\theta; x_i, y_i)$。
 
@@ -43,9 +43,9 @@ plt.legend(); plt.show()
 
 构造 Lagrangian：
 
-```math
+$$
 \mathcal{L}(\mathbf{x}, \boldsymbol{\lambda}, \boldsymbol{\mu}) = f(\mathbf{x}) + \sum_i \lambda_i g_i(\mathbf{x}) + \sum_j \mu_j h_j(\mathbf{x})
-```
+$$
 
 KKT 条件指出，最优解 $\mathbf{x}^*$ 必须满足：
 
@@ -62,35 +62,35 @@ KKT 条件指出，最优解 $\mathbf{x}^*$ 必须满足：
 
 **随机梯度下降**是深度学习的"主力"：
 
-```math
+$$
 \theta_{t+1} = \theta_t - \eta_t \nabla_\theta L(\theta_t; \mathcal{B}_t)
-```
+$$
 
 其中 $\mathcal{B}_t$ 是当前 mini-batch。SGD 的几个改进方向：
 
 **Momentum**（动量）：把历史梯度指数加权累加，平滑震荡。
 
-```math
+$$
 v_{t+1} = \beta v_t + \nabla L(\theta_t), \quad \theta_{t+1} = \theta_t - \eta v_{t+1}
-```
+$$
 
 直觉：把梯度看作"力"，动量相当于"惯性"，能帮助穿越狭窄山谷和鞍点。
 
 **Adam**（Adaptive Moment Estimation）：同时维护一阶矩 $m_t$ 和二阶矩 $v_t$ 的指数滑动平均，并用 $\sqrt{v_t}$ 缩放每个参数的学习率：
 
-```math
+$$
 m_{t+1} = \beta_1 m_t + (1-\beta_1) g_t,\quad
 v_{t+1} = \beta_2 v_t + (1-\beta_2) g_t^2
-```
+$$
 
-```math
+$$
 \hat{m}_{t+1} = \frac{m_{t+1}}{1-\beta_1^{t+1}},\quad
 \hat{v}_{t+1} = \frac{v_{t+1}}{1-\beta_2^{t+1}}
-```
+$$
 
-```math
+$$
 \theta_{t+1} = \theta_t - \eta \frac{\hat{m}_{t+1}}{\sqrt{\hat{v}_{t+1}} + \epsilon}
-```
+$$
 
 其中 $\hat{m}, \hat{v}$ 是偏差修正。Adam 对稀疏梯度友好，是 Transformer 训练的事实标准。**AdamW** 在 Adam 基础上把权重衰减从梯度里解耦到参数更新里，对大模型预训练更稳定。
 
@@ -103,9 +103,9 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.01)
 
 **Newton 法**利用 Hessian 矩阵 $H = \nabla^2 f$：
 
-```math
+$$
 \theta_{t+1} = \theta_t - H^{-1} \nabla f(\theta_t)
-```
+$$
 
 收敛速度是二次的（解附近的步数按平方递减），但 Hessian 是 $n \times n$ 矩阵，存储和求逆都是 $O(n^3)$，对亿级参数的模型完全不可行。
 

@@ -34,27 +34,27 @@ x = self.tok_emb(tokens) + self.pos_emb(positions)
 
 LLaMA 系列使用 RoPE，把 $q, k$ 投影到 2D 平面上按位置旋转：
 
-```math
+$$
 \text{RoPE}(x,\, m) = x \cdot e^{i\, m\theta_l}
-```
+$$
 
 具体到维度对 $(x_{2l}, x_{2l+1})$：
 
-```math
+$$
 \begin{pmatrix} x'_{2l} \\ x'_{2l+1} \end{pmatrix}
 =
 \begin{pmatrix} \cos(m\theta_l) & -\sin(m\theta_l) \\ \sin(m\theta_l) & \cos(m\theta_l) \end{pmatrix}
 \begin{pmatrix} x_{2l} \\ x_{2l+1} \end{pmatrix}
-```
+$$
 
 不同维度用不同频率 $\theta_l = 10000^{-2l/d}$。
 
 **关键性质**：attention 内积只依赖于相对距离 $(m - n)$：
 
-```math
+$$
 \langle \text{RoPE}(q, m),\ \text{RoPE}(k, n) \rangle
 = \text{Re}\!\left[ q\, k^*\, e^{i(m - n)\theta} \right]
-```
+$$
 
 证明思路：旋转角度之差进入复指数 → 只剩 $(m - n)$。
 
@@ -73,21 +73,21 @@ LLaMA 系列使用 RoPE，把 $q, k$ 投影到 2D 平面上按位置旋转：
 
 ### 3.1 LayerNorm 公式
 
-```math
+$$
 \text{LN}(x) = \gamma \cdot \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta
-```
+$$
 
 其中 $\mu, \sigma^2$ 沿 $d$ 维算。
 
 ### 3.2 RMSNorm：去掉均值中心化
 
-```math
+$$
 \text{RMS}(x) = \sqrt{\frac{1}{d} \sum_{i=1}^{d} x_i^2}
-```
+$$
 
-```math
+$$
 \text{RMSNorm}(x) = \gamma \cdot \frac{x}{\text{RMS}(x) + \epsilon}
-```
+$$
 
 **关键差异**：不做均值减法，只缩放方差，不做中心化。
 
@@ -110,9 +110,9 @@ LLaMA 系列使用 RoPE，把 $q, k$ 投影到 2D 平面上按位置旋转：
 
 ### 4.1 GeLU（GPT-3 用）
 
-```math
+$$
 \text{GeLU}(x) = x \cdot \Phi(x) = x \cdot \frac{1}{2}\!\left[1 + \text{erf}\!\left(\frac{x}{\sqrt{2}}\right)\right]
-```
+$$
 
 是 ReLU 的平滑近似，在 $x=0$ 附近不"硬截断"，保留小幅梯度。
 
@@ -120,13 +120,13 @@ LLaMA 系列使用 RoPE，把 $q, k$ 投影到 2D 平面上按位置旋转：
 
 SwiGLU 在 FFN 里加了一个**门控分支**——两个并行投影，一个过 Swish、一个不过，最后按元素乘：
 
-```math
+$$
 \text{SwiGLU}(x) = \text{Swish}_\beta(x W_1) \odot (x W_3)
-```
+$$
 
-```math
+$$
 \text{FFN}_{\text{SwiGLU}}(x) = \bigl(\text{Swish}_\beta(x W_1) \odot x W_3\bigr)\, W_2
-```
+$$
 
 ```text
         x
@@ -196,9 +196,9 @@ Mistral:       h_q = 32, h_kv = 8
 
 数学上：
 
-```math
+$$
 \text{head}_i^{(q)} = \text{softmax}\!\left(\frac{q_i \, k_{\lfloor i/h_q \cdot h_{kv} \rfloor}^\top}{\sqrt{d_k}}\right) v_{\lfloor i/h_q \cdot h_{kv} \rfloor}
-```
+$$
 
 KV cache 大小：每层 $2 \cdot h_{kv} \cdot d_k \cdot T$。当 $h_{kv} \ll h_q$ 时，几乎接近 MQA 的内存，但保留 MHA 的质量。
 
@@ -237,9 +237,9 @@ KV cache: 第 t 步只算 1 个新 K, V, 旧的从缓存读              → O(T
 
 ### 7.2 KV Cache 显存公式
 
-```math
+$$
 \text{KV size} = 2 \cdot n_{\text{layers}} \cdot n_{\text{kv}} \cdot d_{\text{head}} \cdot \text{seq\_len} \cdot \text{bytes\_per\_elem}
-```
+$$
 
 每个 token 每层需要存 K、V 两份张量。
 

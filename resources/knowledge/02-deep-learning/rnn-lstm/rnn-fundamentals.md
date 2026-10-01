@@ -16,9 +16,9 @@ CNN 通过"局部连接 + 池化"获得空间平移不变性；RNN 则通过**�
 
 RNN 在每个时间步 $t$ 用同一个函数更新隐状态：
 
-```math
+$$
 h_t = \tanh\!\left( W_{hh}\, h_{t-1} + W_{xh}\, x_t + b \right)
-```
+$$
 
 - $x_t \in \mathbb{R}^{d}$：当前步输入向量。
 - $h_t \in \mathbb{R}^{h}$：隐状态，相当于网络的"记忆"。
@@ -70,15 +70,15 @@ class VanillaRNN(nn.Module):
 
 损失在每个时间步可加，例如 $L = \sum_t \ell(y_t, \hat{y}_t)$。对 $h_t$ 的梯度需要沿时间链反传：
 
-```math
+$$
 \frac{\partial L}{\partial h_t} \;=\; \frac{\partial L}{\partial h_T} \prod_{k=t+1}^{T} \frac{\partial h_k}{\partial h_{k-1}}
-```
+$$
 
 而
 
-```math
+$$
 \frac{\partial h_k}{\partial h_{k-1}} \;=\; \text{diag}\!\left(1 - \tanh^2(\cdot)\right) \cdot W_{hh}
-```
+$$
 
 每多走一步，就**乘一次 $W_{hh}$**（再乘一个 $\le 1$ 的 Jacobian 因子）。
 

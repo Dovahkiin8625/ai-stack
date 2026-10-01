@@ -6,9 +6,9 @@
 
 假设有 $M$ 个独立模型，每个错误率 $\epsilon = 0.3$。多数投票下：
 
-```math
+$$
 P_{\text{err}} = \sum_{k > M/2}^{M} \binom{M}{k} \epsilon^k (1-\epsilon)^{M-k}
-```
+$$
 
 $M=21$ 时多数投票错误率约 0.026——远低于单模型 0.3。
 
@@ -89,27 +89,27 @@ shap.summary_plot(shap_values, X_test)
 
 设第 $m$ 轮的样本权重 $w_i^{(m)}$，基模型 $h_m$ 的加权错误率：
 
-```math
+$$
 \epsilon_m = \frac{\sum_{i: h_m(x_i) \neq y_i} w_i^{(m)}}{\sum_i w_i^{(m)}}
-```
+$$
 
 基模型权重：
 
-```math
+$$
 \alpha_m = \frac{1}{2} \ln \frac{1 - \epsilon_m}{\epsilon_m}
-```
+$$
 
 样本权重更新：
 
-```math
+$$
 w_i^{(m+1)} = w_i^{(m)} \exp(-\alpha_m y_i h_m(x_i))
-```
+$$
 
 最后预测：
 
-```math
+$$
 H(x) = \text{sign}\!\left( \sum_{m=1}^{M} \alpha_m h_m(x) \right)
-```
+$$
 
 直觉：错得越厉害的样本获得越大权重，下一轮必须"重点攻克"它。
 
@@ -143,17 +143,17 @@ XGBoost（eXtreme Gradient Boosting）做了几项关键优化：
 
 **1. 二阶泰勒展开的目标**：
 
-```math
+$$
 \mathcal{L}^{(t)} = \sum_i\!\left[ L(y_i, \hat{y}_i^{(t-1)}) + g_i f_t(x_i) + \frac{1}{2} h_i f_t^2(x_i) \right] + \Omega(f_t)
-```
+$$
 
 其中 $g_i, h_i$ 是一阶、二阶梯度。比 GBDT 用一阶更精确。
 
 **2. 正则化目标**：
 
-```math
+$$
 \Omega(f) = \gamma T + \frac{1}{2}\lambda \sum_j w_j^2
-```
+$$
 
 $T$ 是叶子数、$w_j$ 是叶子权重，$\gamma, \lambda$ 控制复杂度。
 

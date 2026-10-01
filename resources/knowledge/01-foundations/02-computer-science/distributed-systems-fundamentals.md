@@ -56,9 +56,9 @@ Raft 把共识拆成三个子问题：
 2. **日志复制**：Leader 收到写请求，把日志条目复制到多数节点后提交。
 3. **安全性**：已提交的日志项永远保留。
 
-```math
+$$
 \text{多数派} = \lfloor n/2 \rfloor + 1 \quad (n \text{ 个节点})
-```
+$$
 
 只要多数节点活着就能继续工作。3 节点容忍 1 故障，5 节点容忍 2 故障。
 
@@ -87,9 +87,9 @@ Raft 把共识拆成三个子问题：
 - **范围分片**：按 key 区间切分，适合范围查询但容易热点。
 - **一致性哈希**：环形 hash，扩缩容只影响相邻节点，被 DynamoDB / Cassandra / Redis Cluster 广泛采用。
 
-```math
+$$
 \text{consistent\_hash}(k) = \text{hash}(k) \mod 2^{32}, \quad k \text{ 落到顺时针下一个虚拟节点}
-```
+$$
 
 ML 工程中：
 
@@ -127,9 +127,9 @@ ML 工程：
 
 **数据并行**：每张卡有完整模型副本，看到不同 mini-batch。
 
-```math
+$$
 g_{\text{global}} = \frac{1}{p} \sum_{i=1}^{p} g_i, \quad \theta \leftarrow \theta - \eta \cdot g_{\text{global}}
-```
+$$
 
 - AllReduce 通信量 $\Theta(p \cdot s)$，带宽效率高。
 - PyTorch DDP、FSDP-zero-1/2 都属此类。

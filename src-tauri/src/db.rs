@@ -48,6 +48,7 @@ pub struct NoteRow {
     pub content: String,
     pub anchor_text: Option<String>,
     pub anchor_occurrence: i64,
+    pub source: String,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -102,12 +103,28 @@ impl Db {
                 content TEXT NOT NULL,
                 anchor_text TEXT,
                 anchor_occurrence INTEGER NOT NULL DEFAULT 0,
+                source TEXT NOT NULL DEFAULT 'user',
                 created_at TEXT NOT NULL,
                 updated_at TEXT NOT NULL,
                 FOREIGN KEY (resource_id) REFERENCES resources(id) ON DELETE CASCADE
              );
              CREATE INDEX IF NOT EXISTS idx_notes_resource ON notes(resource_id);",
         )?;
+        // Phase 5 升级：旧版 notes 表没有 source 列。用 pragma 探测后按需 ALTER，
+        // 避免 SQLite 不支持 ADD COLUMN 的 IF NOT EXISTS 时报错。
+        let has_source: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name = 'source'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_source == 0 {
+            tx.execute(
+                "ALTER TABLE notes ADD COLUMN source TEXT NOT NULL DEFAULT 'user'",
+                [],
+            )?;
+        }
         let now = chrono::Utc::now().to_rfc3339();
         tx.execute(
             "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (1, ?1)",
@@ -243,7 +260,7 @@ impl Db {
     pub fn list_notes(&self, resource_id: i64) -> Result<Vec<NoteRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, resource_id, content, anchor_text, anchor_occurrence,
-                    created_at, updated_at
+                    source, created_at, updated_at
              FROM notes WHERE resource_id = ?1
              ORDER BY id",
         )?;
@@ -255,8 +272,9 @@ impl Db {
                     content: row.get(2)?,
                     anchor_text: row.get(3)?,
                     anchor_occurrence: row.get(4)?,
-                    created_at: row.get(5)?,
-                    updated_at: row.get(6)?,
+                    source: row.get(5)?,
+                    created_at: row.get(6)?,
+                    updated_at: row.get(7)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -269,13 +287,14 @@ impl Db {
         content: &str,
         anchor_text: Option<&str>,
         anchor_occurrence: i64,
+        source: &str,
     ) -> Result<NoteRow> {
         let now = chrono::Utc::now().to_rfc3339();
         self.conn.execute(
             "INSERT INTO notes (resource_id, content, anchor_text, anchor_occurrence,
-                                created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
-            params![resource_id, content, anchor_text, anchor_occurrence, now],
+                                source, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
+            params![resource_id, content, anchor_text, anchor_occurrence, source, now],
         )?;
         let id = self.conn.last_insert_rowid();
         self.get_note(id)
@@ -287,14 +306,26 @@ impl Db {
         content: &str,
         anchor_text: Option<&str>,
         anchor_occurrence: i64,
+        source: Option<&str>,
     ) -> Result<NoteRow> {
+        // source 字段：只有 Some(_) 时才写入，避免每次普通编辑都重写 source；
+        // AI 笔记被用户编辑后降级为 'user'，是这里唯一会传 Some 的场景。
         let now = chrono::Utc::now().to_rfc3339();
-        let changed = self.conn.execute(
-            "UPDATE notes
-             SET content = ?1, anchor_text = ?2, anchor_occurrence = ?3, updated_at = ?4
-             WHERE id = ?5",
-            params![content, anchor_text, anchor_occurrence, now, id],
-        )?;
+        let changed = match source {
+            Some(src) => self.conn.execute(
+                "UPDATE notes
+                 SET content = ?1, anchor_text = ?2, anchor_occurrence = ?3,
+                     source = ?4, updated_at = ?5
+                 WHERE id = ?6",
+                params![content, anchor_text, anchor_occurrence, src, now, id],
+            )?,
+            None => self.conn.execute(
+                "UPDATE notes
+                 SET content = ?1, anchor_text = ?2, anchor_occurrence = ?3, updated_at = ?4
+                 WHERE id = ?5",
+                params![content, anchor_text, anchor_occurrence, now, id],
+            )?,
+        };
         if changed == 0 {
             anyhow::bail!("note {id} not found");
         }
@@ -314,7 +345,7 @@ impl Db {
             .conn
             .query_row(
                 "SELECT id, resource_id, content, anchor_text, anchor_occurrence,
-                        created_at, updated_at
+                        source, created_at, updated_at
                  FROM notes WHERE id = ?1",
                 [id],
                 |r| {
@@ -324,8 +355,9 @@ impl Db {
                         content: r.get(2)?,
                         anchor_text: r.get(3)?,
                         anchor_occurrence: r.get(4)?,
-                        created_at: r.get(5)?,
-                        updated_at: r.get(6)?,
+                        source: r.get(5)?,
+                        created_at: r.get(6)?,
+                        updated_at: r.get(7)?,
                     })
                 },
             )

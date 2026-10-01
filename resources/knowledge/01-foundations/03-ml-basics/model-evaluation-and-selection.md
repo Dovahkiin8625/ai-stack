@@ -4,9 +4,9 @@
 
 ### 准确率与它的局限
 
-```math
+$$
 \text{Accuracy} = \frac{TP + TN}{TP + TN + FP + FN}
-```
+$$
 
 **问题**：在 99% 负样本的数据上，预测全负类也能拿到 99% 准确率——完全没用。
 
@@ -14,15 +14,15 @@
 
 把正类视为"关注类"：
 
-```math
+$$
 \text{Precision} = \frac{TP}{TP + FP}, \quad \text{Recall} = \frac{TP}{TP + FN}
-```
+$$
 
 F1 是精确率与召回率的调和平均：
 
-```math
+$$
 F_1 = \frac{2 \cdot P \cdot R}{P + R}
-```
+$$
 
 F1 适用于"正负类不平衡、两者都要关注"（如信息检索、欺诈检测）。
 
@@ -58,19 +58,19 @@ print(confusion_matrix(y_test, y_pred))
 
 ## 三、回归任务的核心指标
 
-```math
+$$
 \text{MSE}  = \frac{1}{N}\sum_i (y_i - \hat{y}_i)^2, \quad
 \text{RMSE} = \sqrt{\text{MSE}}
-```
+$$
 
-```math
+$$
 \text{MAE}   = \frac{1}{N}\sum_i |y_i - \hat{y}_i|, \quad
 \text{MAPE} = \frac{1}{N}\sum_i \left|\frac{y_i - \hat{y}_i}{y_i}\right|
-```
+$$
 
-```math
+$$
 R^2 = 1 - \frac{\sum_i (y_i - \hat{y}_i)^2}{\sum_i (y_i - \bar{y})^2}
-```
+$$
 
 **MAE 对异常值更鲁棒**；**MSE/RMSE 对大误差更敏感**（适合"不要有大错"的场景）；**MAPE 在 $y$ 接近 0 时不稳定**；**$R^2$ 可为负**（模型比均值还差）。
 

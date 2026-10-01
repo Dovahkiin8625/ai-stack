@@ -4,9 +4,9 @@
 
 监督学习的目标是最小化期望泛化误差 $\mathbb{E}[(y - f(x))^2]$。把 $f(x)$ 用不同训练集训练得到的"平均预测" $\bar{f}(x)$ 表示，可以分解为：
 
-```math
+$$
 \mathbb{E}\!\left[ (y - f(x))^2 \right] = \underbrace{(\bar{f}(x) - y)^2}_{\text{Bias}^2} + \underbrace{\mathbb{E}[(f(x) - \bar{f}(x))^2]}_{\text{Variance}} + \underbrace{\sigma^2}_{\text{Noise}}
-```
+$$
 
 直觉：
 
@@ -61,9 +61,9 @@ train_sizes, train_scores, val_scores = learning_curve(
 
 把模型参数 $\theta$ 的"大小"加入损失：
 
-```math
+$$
 L_{\text{reg}}(\theta) = L(\theta) + \lambda \cdot \Omega(\theta)
-```
+$$
 
 **L2 正则（Ridge / Weight Decay）**：$\Omega(\theta) = \|\theta\|_2^2$。
 
@@ -100,9 +100,9 @@ optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4, weight_decay=0.01)
 
 训练时每个神经元以概率 $p$ 被随机置零：
 
-```math
+$$
 \mathbf{h}^{(l)} = \sigma(W^{(l)} \cdot (\mathbf{m}^{(l)} \odot \mathbf{h}^{(l-1)}) + b^{(l)})
-```
+$$
 
 其中 $\mathbf{m}^{(l)} \sim \text{Bernoulli}(1-p)$。
 
@@ -153,9 +153,9 @@ train_tf = transforms.Compose([
 
 **Mixup** 把两张图按 $\lambda$ 线性混合，标签也按 $\lambda$ 混合：
 
-```math
+$$
 \tilde{x} = \lambda x_i + (1-\lambda) x_j,\quad \tilde{y} = \lambda y_i + (1-\lambda) y_j
-```
+$$
 
 **Cutmix** 用一张图的矩形区域替换另一张图的对应区域，按面积比例混合标签。两者都能显著提升泛化、降低过拟合。
 
@@ -187,9 +187,9 @@ for epoch in range(max_epochs):
 
 **Label Smoothing**：把硬标签 $[0, 1, 0]$ 变成 $[0.05, 0.9, 0.05]$，防止模型对预测过度自信。分类任务标准技巧。
 
-```math
+$$
 y^{\text{LS}}_i = (1 - \epsilon) \cdot y_i + \epsilon / K
-```
+$$
 
 **Noise Injection**：输入加高斯噪声或权重加噪（"SGD 本身就提供隐式正则"）。
 
@@ -197,17 +197,17 @@ y^{\text{LS}}_i = (1 - \epsilon) \cdot y_i + \epsilon / K
 
 **SAM（Sharpness-Aware Minimization）**：寻找损失平坦极小值：
 
-```math
+$$
 \min_\theta \max_{\|\epsilon\| \le \rho} L(\theta + \epsilon)
-```
+$$
 
 ## 八、容量、样本量与泛化界
 
 经典 PAC 理论给出大致关系：
 
-```math
+$$
 \text{泛化误差} \lesssim O\!\left( \sqrt{\frac{C \cdot \log N}{N}} \right)
-```
+$$
 
 $C$ 是模型容量（VC 维、Rademacher 复杂度）。直观：
 

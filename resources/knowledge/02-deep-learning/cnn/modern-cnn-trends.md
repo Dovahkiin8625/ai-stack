@@ -20,9 +20,9 @@ Dosovitskiy 等人 2020 年的 ViT 把图像切成 16×16 的 patch，当作"词
 
 标准卷积的计算量（FLOPs）：
 
-```math
+$$
 \text{FLOPs}_{\text{std}} = H \cdot W \cdot C_{\text{in}} \cdot C_{\text{out}} \cdot k^2
-```
+$$
 
 **深度可分离卷积**把它分成两步：
 
@@ -40,9 +40,9 @@ Dosovitskiy 等人 2020 年的 ViT 把图像切成 16×16 的 patch，当作"词
 
 数学上的 FLOPs 比：
 
-```math
+$$
 \frac{\text{FLOPs}_{\text{DW+P}}}{\text{FLOPs}_{\text{std}}} = \frac{1}{C_{\text{out}}} + \frac{1}{k^2}
-```
+$$
 
 $k=3$、$C_{\text{out}}=64$ 时，深度可分离卷积的计算量只有标准卷积的约 **1/9**，参数也压缩到约 1/9——代价是略低的精度（一般 1–2%）。这种"极低成本"是 MobileNet 在端侧可行的根本。
 
@@ -100,12 +100,12 @@ MobileNet v3-Small 在 ImageNet 上达到 67.5% top-1，速度比 v2 还快—�
 
 传统做法是"要更准就加深度、要更快就减宽度"——但**深度、宽度、分辨率三者一起按比例放大更有效**。
 
-```math
+$$
 \text{depth: } d = \alpha^\phi, \quad
 \text{width: } w = \beta^\phi, \quad
 \text{resolution: } r = \gamma^\phi
 \quad \text{with} \quad \alpha \cdot \beta^2 \cdot \gamma^2 \approx 2
-```
+$$
 
 $\phi$ 是用户指定的"计算预算"，$\alpha, \beta, \gamma$ 由小网格搜索确定。EfficientNet-B0 是基础网络，B1–B7 用同样的复合系数放大。
 

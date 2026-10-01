@@ -13,9 +13,9 @@
 
 **目标**：把 $N$ 个样本分到 $K$ 个簇，最小化簇内平方和：
 
-```math
+$$
 \mathcal{L} = \sum_{k=1}^{K} \sum_{x \in C_k} \|x - \mu_k\|^2
-```
+$$
 
 **算法**（EM 风格的 Lloyd 算法）：
 
@@ -71,9 +71,9 @@ labels = db.labels_   # -1 表示离群点
 
 主成分分析寻找正交方向，使数据在这些方向上的方差最大。等价于对协方差矩阵 $\Sigma = \frac{1}{N} X^\top X$ 做特征分解：
 
-```math
+$$
 \Sigma = U \Lambda U^\top
-```
+$$
 
 取前 $k$ 个最大特征值对应的特征向量组成 $U_k$，则 $z = U_k^\top (x - \bar{x})$。
 
@@ -119,7 +119,7 @@ Z_umap = umap.UMAP(n_neighbors=15, min_dist=0.1).fit_transform(X)
 
 **高斯混合模型（GMM）**：用 $K$ 个高斯分布加权求和拟合数据：
 
-```math
+$$
 P(x) = \sum_{k=1}^{K} \pi_k \mathcal{N}(x; \mu_k, \Sigma_k)
 $$
 
@@ -140,9 +140,9 @@ log_density = gmm.score_samples(X)   # 用于异常检测
 
 **自编码器**通过编码器 $f$ 把 $x$ 映射到 $z$，解码器 $g$ 重建 $\hat{x} = g(f(x))$，最小化重建损失：
 
-```math
+$$
 L = \|x - g(f(x))\|^2
-```
+$$
 
 **变体**：
 

@@ -6,9 +6,9 @@
 
 最朴素的随机梯度下降用单个 mini-batch 的梯度更新参数：
 
-```math
+$$
 w_{t+1} = w_t - \eta \cdot \nabla L(w_t)
-```
+$$
 
 直觉是「沿最陡方向下山」，但实践中会暴露两个问题：
 
@@ -34,10 +34,10 @@ SGD 在病态曲率上的轨迹              期望的轨迹
 
 动量法引入一个速度变量 $v_t$，把梯度看成"加速度"：
 
-```math
+$$
 v_t = \beta v_{t-1} + \nabla L(w_t)
 w_{t+1} = w_t - \eta \cdot v_t
-```
+$$
 
 常用 $\beta = 0.9$ 或 $0.99$。
 
@@ -71,10 +71,10 @@ optimizer = torch.optim.SGD(
 
 朴素 Momentum「先沿累积速度走、再在到达点算梯度」，Nesterov 改成「先**预估**沿累积速度走一步、再在预估点算梯度修正」：
 
-```math
+$$
 v_t = \beta v_{t-1} + \nabla L(w_t - \eta \beta v_{t-1})
 w_{t+1} = w_t - \eta \cdot v_t
-```
+$$
 
 直觉：与其被惯性"推过头"，不如先用惯性"看一眼未来"，再根据未来梯度做修正——这是**lookahead**思想的最早实现之一。NAG 在凸问题上享有 $O(1/t^2)$ 的理论收敛率，比朴素 Momentum 的 $O(1/t)$ 更快。
 
@@ -88,10 +88,10 @@ optimizer = torch.optim.SGD(
 
 SGD 与 Momentum 对所有参数共用一个 $\eta$，但**稀疏特征对应的参数很少被更新，稠密特征对应的参数常被更新**，理应有不同的步长。AdaGrad 为每个参数维护一个**梯度平方的累加和**：
 
-```math
+$$
 G_t = \sum_{\tau=1}^{t} g_\tau^2,\qquad
 \theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{G_t} + \epsilon} \cdot g_t
-```
+$$
 
 含义：被频繁更新的参数，$G_t$ 大，步长自动变小；不常更新的参数，$G_t$ 小，步长自动变大。适合**稀疏数据**（NLP 词嵌入、推荐系统）。
 
@@ -101,10 +101,10 @@ G_t = \sum_{\tau=1}^{t} g_\tau^2,\qquad
 
 RMSProp 把 AdaGrad 的"全量累加"换成**指数加权移动平均（EMA）**，让历史梯度平方的影响指数衰减：
 
-```math
+$$
 v_t = \beta v_{t-1} + (1-\beta) g_t^2,\qquad
 \theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{v_t} + \epsilon} \cdot g_t
-```
+$$
 
 常用 $\beta = 0.99$。这样学习率能"自适应但不持续衰减"，是非凸深度网络的事实标准之一。
 
@@ -112,13 +112,13 @@ v_t = \beta v_{t-1} + (1-\beta) g_t^2,\qquad
 
 Adam 把 Momentum（梯度一阶矩）与 RMSProp（梯度二阶矩）合到一起，并加上**偏差修正**抵消初始零偏置：
 
-```math
+$$
 m_t = \beta_1 m_{t-1} + (1-\beta_1) g_t       \quad\text{（一阶矩估计）}
 v_t = \beta_2 v_{t-1} + (1-\beta_2) g_t^2     \quad\text{（二阶矩估计）}
 \hat{m}_t = \frac{m_t}{1 - \beta_1^t},\quad
 \hat{v}_t = \frac{v_t}{1 - \beta_2^t}          \quad\text{（偏差修正）}
 \theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{\hat{v}_t} + \epsilon} \cdot \hat{m}_t
-```
+$$
 
 默认 $\beta_1 = 0.9$，$\beta_2 = 0.999$，$\epsilon = 10^{-8}$。Adam 因其「默认即好用」的特性，迅速成为深度学习的默认优化器。
 
@@ -130,9 +130,9 @@ optimizer = torch.optim.Adam(model.parameters(), lr=1e-3, betas=(0.9, 0.999))
 
 Adam + L2 正则其实有一个微妙问题：L2 项的梯度会被 $\sqrt{\hat{v}_t}$ 一起缩放，**对不同参数正则强度不一致**。AdamW（Loshchilov & Hutter, 2019）直接把 weight decay 从梯度中拿掉，单独加在参数上：
 
-```math
+$$
 \theta_{t+1} = \theta_t - \frac{\eta}{\sqrt{\hat{v}_t} + \epsilon} \cdot \hat{m}_t - \eta \lambda \theta_t
-```
+$$
 
 好处：
 

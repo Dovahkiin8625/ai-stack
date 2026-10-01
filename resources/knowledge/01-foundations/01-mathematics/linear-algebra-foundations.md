@@ -12,17 +12,17 @@
 
 矩阵乘法是把线性变换"串起来"的工具。例如，给定：
 
-```math
+$$
 A = \begin{pmatrix} 1 & 2 \\ 3 & 4 \end{pmatrix},\quad
 B = \begin{pmatrix} 5 & 6 \\ 7 & 8 \end{pmatrix}
-```
+$$
 
 那么 $AB$ 的计算方式为：
 
-```math
+$$
 AB = \begin{pmatrix} 1\cdot5+2\cdot7 & 1\cdot6+2\cdot8 \\ 3\cdot5+4\cdot7 & 3\cdot6+4\cdot8 \end{pmatrix}
 = \begin{pmatrix} 19 & 22 \\ 43 & 50 \end{pmatrix}
-```
+$$
 
 注意矩阵乘法不满足交换律，即 $AB \neq BA$。理解这一点对理解神经网络中"权重矩阵左乘输入"很重要。
 

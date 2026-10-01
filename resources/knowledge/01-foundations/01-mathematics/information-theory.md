@@ -4,15 +4,15 @@
 
 设 $P$ 为离散分布，**熵** $H(P)$ 度量 $P$ 的"内在不确定性"：
 
-```math
+$$
 H(P) = -\sum_x P(x) \log P(x)
-```
+$$
 
 **KL 散度**（相对熵）度量两个分布的差异：
 
-```math
+$$
 D_{\mathrm{KL}}(P \Vert Q) = \sum_x P(x) \log \frac{P(x)}{Q(x)} = -H(P) + H(P, Q)
-```
+$$
 
 其中 $H(P, Q) = -\sum_x P(x) \log Q(x)$ 是交叉熵。注意 KL **不是**对称的——$D_{\mathrm{KL}}(P \Vert Q) \ne D_{\mathrm{KL}}(Q \Vert P)$，前者是"用 $Q$ 编码 $P$ 时多花的比特数"的期望。
 
@@ -20,9 +20,9 @@ D_{\mathrm{KL}}(P \Vert Q) = \sum_x P(x) \log \frac{P(x)}{Q(x)} = -H(P) + H(P, Q
 
 **互信息**（Mutual Information）度量两个随机变量 $X, Y$ 共享的信息量：
 
-```math
+$$
 I(X; Y) = D_{\mathrm{KL}}\!\left( P_{(X,Y)} \;\Vert\; P_X \otimes P_Y \right) = H(X) - H(X \mid Y)
-```
+$$
 
 直觉：如果知道 $Y$ 能让 $X$ 的不确定性降低多少，$I(X;Y)$ 就是那个"降低量"。
 
@@ -38,9 +38,9 @@ I(X; Y) = D_{\mathrm{KL}}\!\left( P_{(X,Y)} \;\Vert\; P_X \otimes P_Y \right) = 
 
 Tishby 等人提出的**信息瓶颈（IB）**框架把学习表示 $\mathbf{z}$ 看作一个有约束优化问题：
 
-```math
+$$
 \min_{P_{\mathbf{z}\mid \mathbf{x}}} \; I(\mathbf{z}; \mathbf{x}) - \beta \cdot I(\mathbf{z}; y)
-```
+$$
 
 目标：表示 $\mathbf{z}$ 要尽可能压缩输入 $\mathbf{x}$（最小化 $I(\mathbf{z}; \mathbf{x})$），同时保留与标签 $y$ 相关的信息（最大化 $I(\mathbf{z}; y)$）。$\beta$ 控制压缩-预测权衡。
 
@@ -50,15 +50,15 @@ Tishby 等人提出的**信息瓶颈（IB）**框架把学习表示 $\mathbf{z}$
 
 **对比学习**的核心目标：让正样本对的表示相似、负样本对的表示远离。InfoNCE 损失用一个分类视角统一了多种对比方法：
 
-```math
+$$
 \mathcal{L}_{\text{InfoNCE}} = -\mathbb{E}\!\left[ \log \frac{\exp(s(\mathbf{z}_i, \mathbf{z}_i^+) / \tau)}{\sum_{j=1}^{K} \exp(s(\mathbf{z}_i, \mathbf{z}_j) / \tau)} \right]
-```
+$$
 
 其中 $s(\cdot, \cdot)$ 是余弦相似度，$\tau$ 是温度，$K$ 是负样本数。InfoNCE 与互信息的下界紧密相关：
 
-```math
+$$
 I(\mathbf{z}; \mathbf{z}^+) \ge \log(K) - \mathcal{L}_{\text{InfoNCE}}
-```
+$$
 
 直观：负样本越多，$K$ 越大，下界越紧，学到的表示越好。这也是为什么 CLIP 训练时使用 32 768 个负样本。
 
@@ -79,15 +79,14 @@ def infonce(z1, z2, temperature=0.1):
 
 把信息论扩展到"传输"场景：信源 $X$、信道 $P(Y|X)$、接收方收到 $Y$。**信道容量**是信道能可靠传输的最大信息率：
 
-```math
+$$
 C = \max_{P_X} \; I(X; Y)
-```
+$$
 
 这是香农第二定理的基础：只要传输速率 $R < C$，总存在编码使错误率任意小。
 
 **率失真理论**研究"在允许失真 $D$ 的条件下，压缩的最小比特率"：
-
-```math
+$$
 R(D) = \min_{P_{\hat{X}|X}:\; \mathbb{E}[d(X,\hat{X})] \le D} \; I(X; \hat{X})
 $$
 

@@ -4,9 +4,9 @@
 
 设想把 $L$ 层"线性"网络堆起来：
 
-```math
+$$
 a^{(L)} = W^{(L)} W^{(L-1)} \cdots W^{(1)} x + \text{合并后的偏置}
-```
+$$
 
 这本质还是一个**线性变换**——再多层也只能拟合一条直线/平面/超平面，无法表示 XOR、圆、曲线等任何非线性关系。
 
@@ -14,9 +14,9 @@ a^{(L)} = W^{(L)} W^{(L-1)} \cdots W^{(1)} x + \text{合并后的偏置}
 
 ## 二、Sigmoid：经典但有饱和问题
 
-```math
+$$
 \sigma(z) = \frac{1}{1 + e^{-z}},\quad \sigma'(z) = \sigma(z)(1 - \sigma(z))
-```
+$$
 
 ```text
    σ(z)
@@ -43,9 +43,9 @@ a^{(L)} = W^{(L)} W^{(L-1)} \cdots W^{(1)} x + \text{合并后的偏置}
 
 ## 三、Tanh：零中心但仍饱和
 
-```math
+$$
 \tanh(z) = \frac{e^z - e^{-z}}{e^z + e^{-z}},\quad \tanh'(z) = 1 - \tanh^2(z)
-```
+$$
 
 ```text
   tanh(z)
@@ -64,9 +64,9 @@ Tanh 在 RNN 中作为隐状态激活比 sigmoid 更常用；在 Transformer 中
 
 ## 四、ReLU：深度学习的"工业标准"
 
-```math
+$$
 \text{ReLU}(z) = \max(0, z),\quad \text{ReLU}'(z) = \mathbf{1}_{z>0}
-```
+$$
 
 ```text
   ReLU(z)
@@ -133,9 +133,9 @@ act = {
 
 **多分类（互斥）**：
 
-```math
+$$
 \text{softmax}(z_i) = \frac{e^{z_i}}{\sum_j e^{z_j}}
-```
+$$
 
 - 把 $K$ 个 logits 归一到"概率分布"（和为 1，互斥）。
 - 直接与 **Cross-Entropy** 损失搭配最稳定。
@@ -158,29 +158,29 @@ loss = F.nll_loss(log_prob, y)          # 或 F.cross_entropy(logits, y)
 
 **均方误差（MSE）**：
 
-```math
+$$
 L_{\text{MSE}} = \frac{1}{N}\sum_i (\hat{y}_i - y_i)^2
-```
+$$
 
 - 对异常值敏感（平方放大误差），梯度 $\propto$ 误差——远离最优点时步长大，可能震荡。
 - 与高斯噪声假设一致：$y \mid x \sim \mathcal{N}(f(x), \sigma^2)$ 时，MSE 是 MLE。
 
 **平均绝对误差（MAE）**：
 
-```math
+$$
 L_{\text{MAE}} = \frac{1}{N}\sum_i |\hat{y}_i - y_i|
-```
+$$
 
 - 对异常值鲁棒，但 $z=0$ 处不可导，训练末期梯度恒为 1 难收敛。
 
 **Huber 损失**：小误差用平方、大误差用绝对值，平滑过渡。
 
-```math
+$$
 L_\delta(r) = \begin{cases}
 \tfrac{1}{2} r^2 & |r| \le \delta \\
 \delta(|r| - \tfrac{1}{2}\delta) & |r| > \delta
 \end{cases}
-```
+$$
 
 回归任务上 Huber 通常更稳。
 
@@ -188,15 +188,15 @@ L_\delta(r) = \begin{cases}
 
 **二分类交叉熵（BCE）**：
 
-```math
+$$
 L = -\frac{1}{N}\sum_i \left[ y_i \log \hat{y}_i + (1-y_i)\log(1-\hat{y}_i) \right]
-```
+$$
 
 **多分类交叉熵**：
 
-```math
+$$
 L = -\frac{1}{N}\sum_i \sum_{k=1}^K y_{i,k} \log \hat{y}_{i,k}
-```
+$$
 
 其中 $\hat{y}_{i,k}$ 是 softmax 输出。**Cross-Entropy = LogLikelihood 的负数**——在多项分布假设下，最小化 CE 等价于 MLE。
 
@@ -215,21 +215,21 @@ loss = -(F.log_softmax(logits, 1)[torch.arange(B), y]).mean()  # 手写版
 
 设 $\hat{y} = \sigma(z)$，真实标签 $y \in \{0, 1\}$，$L_{\text{MSE}} = \tfrac{1}{2}(\hat{y} - y)^2$，对 $z$ 求梯度：
 
-```math
+$$
 \frac{\partial L_{\text{MSE}}}{\partial z} = (\hat{y} - y)\,\hat{y}(1-\hat{y})
-```
+$$
 
 当 $\hat{y} \to 0$ 或 $\hat{y} \to 1$（即预测很"自信"）时，$\hat{y}(1-\hat{y}) \to 0$ —— **梯度消失**，学习停滞，即便预测错了也无法纠正。
 
 换成 sigmoid 输出 + 交叉熵：
 
-```math
+$$
 L_{\text{BCE}} = -[y \log \hat{y} + (1-y)\log(1-\hat{y})]
-```
+$$
 
-```math
+$$
 \frac{\partial L_{\text{BCE}}}{\partial z} = \hat{y} - y
-```
+$$
 
 梯度就是**预测与真值的差**，**与 sigmoid 自身的饱和无关**。这就是"CE + Sigmoid"组合抗饱和的根本原因——也是 softmax + CE 的等价好性质。
 
@@ -241,15 +241,15 @@ L_{\text{BCE}} = -[y \log \hat{y} + (1-y)\log(1-\hat{y})]
 
 - **加权 CE**：每类一个权重，少数类权重大。
 
-```math
+$$
 L = -\alpha_{y} \log \hat{y}_y
-```
+$$
 
 - **Focal Loss**（RetinaNet）：在 CE 上再乘 $(1 - \hat{y})^\gamma$，让"已经分对的样本"梯度变小。
 
-```math
+$$
 L_{\text{focal}} = -(1 - \hat{y})^\gamma \log \hat{y}
-```
+$$
 
 - **OHEM / class-balanced sampling**：训练时只取难样本 / 少数类过采样。
 

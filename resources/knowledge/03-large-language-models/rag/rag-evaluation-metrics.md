@@ -25,17 +25,17 @@ RAGAS（Retrieval-Augmented Generation Assessment）是当下最广泛使用的 
 
 设 $Q$ 为用户问题，$C$ 为检索上下文，$A$ 为生成答案：
 
-```math
+$$
 \text{ContextRelevance} = \frac{|\text{claims}(Q) \cap \text{claims}(C)|}{|\text{claims}(Q)|}
-```
+$$
 
-```math
+$$
 \text{Faithfulness} = \frac{|\text{claims}(A) \cap \text{claims}(C)|}{|\text{claims}(A)|}
-```
+$$
 
-```math
+$$
 \text{AnswerRelevance} = 1 - \text{distance}(\text{embed}(Q), \text{embed}(A\text{ from }Q'))
-```
+$$
 
 其中 $Q'$ 是从 $A$ 反推出的"如果我问这个问题，答案会是什么"。直觉上：好的答案应该既忠于证据、又切题。
 

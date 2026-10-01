@@ -68,25 +68,25 @@ loss = F.cross_entropy(logits.reshape(-1, V), decoder_target.reshape(-1))
 
 给定解码器上一时刻隐状态 $s_{i-1}$ 和编码器第 $j$ 个隐状态 $h_j$，计算它们的相关性：
 
-```math
+$$
 e_{ij} \;=\; v_a^\top \,\tanh\!\left( W_a\, s_{i-1} + U_a\, h_j \right)
-```
+$$
 
 $W_a \in \mathbb{R}^{d_a \times d_h}, U_a \in \mathbb{R}^{d_a \times d_h}, v_a \in \mathbb{R}^{d_a}$ 是可学习参数。这是一种**加性**（additive）注意力——把 $s$ 和 $h$ 投影到同一空间再相加。
 
 ### 3.2 注意力权重（softmax 归一化）
 
-```math
+$$
 \alpha_{ij} \;=\; \frac{\exp(e_{ij})}{\sum_{k=1}^{T_x} \exp(e_{ik})}
-```
+$$
 
 $\alpha_{ij}$ 表示"生成第 $i$ 个目标 token 时，第 $j$ 个源 token 的重要性"。
 
 ### 3.3 上下文向量
 
-```math
+$$
 c_i \;=\; \sum_{j=1}^{T_x} \alpha_{ij}\, h_j
-```
+$$
 
 $c_i$ 是编码器所有隐状态的**加权平均**，权重由对齐分数决定。解码器在第 $i$ 步用 $c_i$（而非固定的 $c$）配合 $s_{i-1}$ 算出 $s_i$ 并生成 $y_i$。
 
@@ -115,15 +115,15 @@ $c_i$ 是编码器所有隐状态的**加权平均**，权重由对齐分数决�
 
 **Luong et al. (2015)** 提出更简洁的**乘性**形式：
 
-```math
+$$
 e_{ij} \;=\; s_{i-1}^\top \, W_a\, h_j \quad \text{(general)}
-```
+$$
 
 当 $W_a = I$ 时退化为最简单的**点积**：
 
-```math
+$$
 e_{ij} \;=\; s_{i-1}^\top h_j \quad \text{(dot / Luong dot)}
-```
+$$
 
 点积版无额外参数、计算更快，但要求 $s, h$ 同维度；加性版（Bahdanau）更灵活、对维度不匹配更鲁棒——这也正是后来 Transformer 选择加性"扩展形式"再让 $d_k$ 足够大的原因（详见注意力机制那篇）。
 

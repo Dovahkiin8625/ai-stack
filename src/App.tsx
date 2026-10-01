@@ -3,8 +3,6 @@ import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
 import { listen } from '@tauri-apps/api/event';
 import Layout from './components/layout/Layout';
 import CategoryPage from './routes/CategoryPage';
-import Notes from './routes/Notes';
-import Dashboard from './routes/Dashboard';
 import Settings from './routes/Settings';
 import { useThemeStore } from './stores/theme';
 import { useLibraryStore } from './stores/library';
@@ -37,8 +35,6 @@ export default function App() {
           <Route path="/library/:category" element={<CategoryPage />} />
           <Route path="/library/:category/:subPath" element={<CategoryPage />} />
           <Route path="/library/:category/:subPath/:article" element={<CategoryPage />} />
-          <Route path="/notes" element={<Notes />} />
-          <Route path="/dashboard" element={<Dashboard />} />
           <Route path="/settings" element={<Settings />} />
           <Route path="*" element={<Navigate to="/library/01-foundations" replace />} />
         </Route>

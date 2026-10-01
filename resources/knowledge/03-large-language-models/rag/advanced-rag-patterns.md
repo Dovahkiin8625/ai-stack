@@ -20,9 +20,9 @@ hits = sorted(zip(hits, scores), key=lambda x: -x[1])[:5]
 
 BM25 是经典的稀疏检索算法，基于词频与文档长度，对精确术语、人名、产品型号特别敏感；dense retrieval 擅长语义匹配但对稀有词不友好。混合检索对两者结果做加权融合：
 
-```math
+$$
 \text{score}(q, d) = \alpha \cdot \text{BM25}(q, d) + (1 - \alpha) \cdot \text{cosine}(q, d)
-```
+$$
 
 **何时用**：领域含有大量专业术语或代码标识符。
 

@@ -72,12 +72,16 @@ export interface ScanProgress {
 }
 
 // === Phase 3: notes ===
+export type NoteSource = 'user' | 'ai';
+
 export interface Note {
   id: number;
   resourceId: number;
   content: string;
   anchorText: string | null;
   anchorOccurrence: number;
+  /** 笔记来源：'user' 人工添加 / 'ai' 大模型讲解 */
+  source: NoteSource;
   createdAt: string;
   updatedAt: string;
 }
@@ -87,6 +91,8 @@ export interface NewNoteInput {
   content: string;
   anchorText: string | null;
   anchorOccurrence: number;
+  /** 留空时后端默认 'user' */
+  source?: NoteSource;
 }
 
 export interface NoteUpdateInput {
@@ -94,4 +100,9 @@ export interface NoteUpdateInput {
   content: string;
   anchorText: string | null;
   anchorOccurrence: number;
+  /**
+   * 编辑时如果需要把 AI 笔记降级为用户笔记，前端传 'user'；
+   * 不传则保留原 source（向后兼容）。
+   */
+  source?: NoteSource;
 }

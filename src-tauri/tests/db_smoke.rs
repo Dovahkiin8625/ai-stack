@@ -111,3 +111,63 @@ fn delete_missing_removes_rows_not_in_set() {
         .into_iter().map(|r| r.rel_path).collect();
     assert_eq!(remaining, vec!["a.md".to_string(), "c.md".to_string()]);
 }
+
+/// 准备一个能装笔记的资源分类，避免每个 case 重复 setup
+fn fixture_with_resource(db: &mut Db) -> i64 {
+    db.upsert_category("x".into(), None, "X".into(), 1).unwrap();
+    db.upsert_resource(ResourceInput {
+        category_path: "x".into(),
+        rel_path: "a.md".into(),
+        r#type: "markdown".into(),
+        title: "A".into(),
+        size_bytes: 1,
+        hash: "h".into(),
+        page_count: None,
+        word_count: None,
+    }).unwrap()
+}
+
+#[test]
+fn update_note_without_source_keeps_existing_source() {
+    // 用户编辑时（前端不传 source）：保留原 source 不变
+    let tmp = tempfile::tempdir().unwrap();
+    let mut db = Db::open(&tmp.path().join("t.db")).unwrap();
+    db.migrate().unwrap();
+    let rid = fixture_with_resource(&mut db);
+    let ai = db.insert_note(rid, "AI 内容", None, 0, "ai").unwrap();
+    assert_eq!(ai.source, "ai");
+
+    // 普通编辑，source 传 None
+    let after = db.update_note(ai.id, "编辑后", None, 0, None).unwrap();
+    assert_eq!(after.source, "ai", "未传 source 时必须保留原值");
+    assert_eq!(after.content, "编辑后");
+}
+
+#[test]
+fn update_note_with_source_can_demote_ai_to_user() {
+    // 用户编辑 AI 笔记后降级为 user
+    let tmp = tempfile::tempdir().unwrap();
+    let mut db = Db::open(&tmp.path().join("t.db")).unwrap();
+    db.migrate().unwrap();
+    let rid = fixture_with_resource(&mut db);
+    let ai = db.insert_note(rid, "AI 内容", None, 0, "ai").unwrap();
+
+    let after = db.update_note(ai.id, "用户改写", None, 0, Some("user")).unwrap();
+    assert_eq!(after.source, "user");
+    assert_eq!(after.content, "用户改写");
+}
+
+#[test]
+fn list_notes_reflects_source_after_update() {
+    // 降级后 list_notes 拿到的也是 user
+    let tmp = tempfile::tempdir().unwrap();
+    let mut db = Db::open(&tmp.path().join("t.db")).unwrap();
+    db.migrate().unwrap();
+    let rid = fixture_with_resource(&mut db);
+    let ai = db.insert_note(rid, "AI 内容", None, 0, "ai").unwrap();
+    db.update_note(ai.id, "改写", None, 0, Some("user")).unwrap();
+    let listed = db.list_notes(rid).unwrap();
+    assert_eq!(listed.len(), 1);
+    assert_eq!(listed[0].source, "user");
+    assert_eq!(listed[0].content, "改写");
+}

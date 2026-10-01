@@ -10,9 +10,9 @@
 
 设 $y = f(g(x))$，则：
 
-```math
+$$
 \frac{dy}{dx} = \frac{dy}{dg} \cdot \frac{dg}{dx}
-```
+$$
 
 多元与向量版本类似：Jacobian 矩阵按链式相乘。反向传播做的事就是：**从最外层往里，每一步乘上局部导数**。
 
@@ -48,9 +48,9 @@
 
 考虑：
 
-```math
+$$
 h = \sigma(W_1 x + b_1),\quad \hat{y} = W_2 h + b_2,\quad L = \tfrac{1}{2}(\hat{y} - y)^2
-```
+$$
 
 **前向**（假设批量大小 1）：
 
@@ -60,23 +60,23 @@ x ──► z1 = W1·x + b1 ──► h = σ(z1) ──► z2 = W2·h + b2 ─�
 
 **反向**：从 $\partial L / \partial L = 1$ 出发，按链式法则往回传：
 
-```math
+$$
 \delta_2 = \frac{\partial L}{\partial z_2} = (\hat{y} - y)               \quad \text{（输出误差）}
-```
+$$
 
-```math
+$$
 \delta_1 = \frac{\partial L}{\partial z_1} = (W_2^\top \delta_2) \odot \sigma'(z_1) \quad \text{（隐藏误差）}
-```
+$$
 
 梯度：
 
-```math
+$$
 \frac{\partial L}{\partial W_2} = \delta_2 \cdot h^\top,\quad \frac{\partial L}{\partial b_2} = \delta_2
-```
+$$
 
-```math
+$$
 \frac{\partial L}{\partial W_1} = \delta_1 \cdot x^\top,\quad \frac{\partial L}{\partial b_1} = \delta_1
-```
+$$
 
 直觉：**每一层的误差** $\delta_l$ 就是"我对下游错误该负多少责"，乘上自己的输入得到对参数的梯度。
 
@@ -84,21 +84,21 @@ x ──► z1 = W1·x + b1 ──► h = σ(z1) ──► z2 = W2·h + b2 ─�
 
 对于第 $l$ 层，定义误差信号 $\delta^{(l)} = \partial L / \partial z^{(l)}$（预激活处的梯度），有四个等价表述：
 
-```math
+$$
 \text{BP1（输出层误差）} \quad \delta^{(L)} = \nabla_{\hat{y}} L \odot \sigma'_L(z^{(L)})
-```
+$$
 
-```math
+$$
 \text{BP2（反向传播）} \quad \delta^{(l)} = \left( W^{(l+1)\top} \delta^{(l+1)} \right) \odot \sigma'_l(z^{(l)})
-```
+$$
 
-```math
+$$
 \text{BP3（权重梯度）} \quad \frac{\partial L}{\partial W^{(l)}} = \delta^{(l)} \, a^{(l-1)\top}
-```
+$$
 
-```math
+$$
 \text{BP4（偏置梯度）} \quad \frac{\partial L}{\partial b^{(l)}} = \delta^{(l)}
-```
+$$
 
 **BP1** 从损失开始；**BP2** 把误差"传"回上一层（注意是 $W^\top$ 而非 $W$）；**BP3/4** 把误差乘上对应输入得到参数梯度。这就是"反向传播"名字的由来——误差信号 $\delta$ 像波一样从输出层往输入层传播。
 
@@ -106,9 +106,9 @@ x ──► z1 = W1·x + b1 ──► h = σ(z1) ──► z2 = W2·h + b2 ─�
 
 **元素形式**（教学清晰）：
 
-```math
+$$
 \delta^{(l)}_i = \sum_j W^{(l+1)}_{ji} \delta^{(l+1)}_j \cdot \sigma'(z^{(l)}_i)
-```
+$$
 
 **矩阵形式**（实现高效）：对每个样本独立计算，最后用批量平均（或求和）。
 

@@ -40,3 +40,36 @@ export async function updateNote(input: NoteUpdateInput): Promise<Note> {
 export async function deleteNote(id: number): Promise<void> {
   return invoke<void>('delete_note', { id });
 }
+
+export interface TranslateInput {
+  text: string;
+  baseUrl: string;
+  lightweightModel: string;
+  apiKey: string;
+}
+
+export async function translateText(input: TranslateInput): Promise<string> {
+  return invoke<string>('translate_text', { payload: input });
+}
+
+export interface AiAnnotateInput {
+  resourceId: number;
+  selectedText: string;
+  contextBefore: string;
+  contextAfter: string;
+  sectionTitle: string;
+  baseUrl: string;
+  performanceModel: string;
+  apiKey: string;
+}
+
+/**
+ * 流式 AI 讲解：
+ * - 立即返回占位笔记（content=""，source="ai"），前端把它放进笔记列表、打开抽屉
+ * - 后端在 tokio 后台任务里拉 Anthropic SSE，逐 chunk emit "ai-annotate-chunk" 事件
+ * - 全部结束 emit "ai-annotate-done"；失败 emit "ai-annotate-error" 并把错误文本写进 note.content
+ * 整个过程无 loading 气泡，用户在抽屉里看到文字边生成边流入
+ */
+export async function startAiAnnotate(input: AiAnnotateInput): Promise<Note> {
+  return invoke<Note>('start_ai_annotate', { payload: input });
+}

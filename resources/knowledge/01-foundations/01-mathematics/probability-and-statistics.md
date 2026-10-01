@@ -13,9 +13,9 @@
 
 ## 二、贝叶斯定理
 
-```math
+$$
 P(A \mid B) = \frac{P(B \mid A) P(A)}{P(B)}
-```
+$$
 
 它把"已知结果反推原因"这件事形式化。在 ML 中的应用：
 
@@ -27,10 +27,10 @@ P(A \mid B) = \frac{P(B \mid A) P(A)}{P(B)}
 
 期望 $\mathbb{E}[X]$ 是分布的"中心"，方差 $\text{Var}(X)$ 是"分散程度"。
 
-```math
+$$
 \mathbb{E}[X] = \sum_x x P(x),\quad
 \text{Var}(X) = \mathbb{E}[(X - \mathbb{E}[X])^2]
-```
+$$
 
 两个变量的协方差 $\text{Cov}(X,Y)$ 衡量它们线性相关的强度和方向。在 PCA 中，我们对协方差矩阵做特征分解来寻找主方向。
 
@@ -38,15 +38,15 @@ P(A \mid B) = \frac{P(B \mid A) P(A)}{P(B)}
 
 **熵** 衡量分布的不确定性：
 
-```math
+$$
 H(P) = -\sum_x P(x) \log P(x)
-```
+$$
 
 **交叉熵** 是分类任务最常用的损失：
 
-```math
+$$
 H(P, Q) = -\sum_x P(x) \log Q(x)
-```
+$$
 
 训练时 $P$ 是真实 one-hot 标签，$Q$ 是模型预测分布，最小化交叉熵等价于极大似然估计。
 

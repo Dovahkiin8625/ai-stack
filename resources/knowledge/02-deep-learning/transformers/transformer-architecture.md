@@ -65,13 +65,13 @@ x = x * (d_model ** 0.5)
 
 原论文使用一组不同频率的正弦/余弦：
 
-```math
+$$
 PE_{(pos,\, 2i)}   = \sin\!\left(\frac{pos}{10000^{2i/d_{\text{model}}}}\right)
-```
+$$
 
-```math
+$$
 PE_{(pos,\, 2i+1)} = \cos\!\left(\frac{pos}{10000^{2i/d_{\text{model}}}}\right)
-```
+$$
 
 其中 $pos$ 是 token 位置，$i$ 是维度索引。
 
@@ -101,9 +101,9 @@ position 2:  [ 0.909, -0.416, 0.020, 0.998, ...]   │  token emb
 
 LLaMA、Mistral 等现代 LLM 不再用 sinusoidal，而是**把 Q、K 向量按位置做复数旋转**：
 
-```math
+$$
 \text{RoPE}(x,\, pos) = x \cdot e^{i\, pos \cdot \theta_l}
-```
+$$
 
 直观上：把 $q, k$ 看成复数，对位置 $pos$ 旋转一个角度 $pos \cdot \theta_l$，再求内积 $\langle \text{RoPE}(q_i, i),\ \text{RoPE}(k_j, j) \rangle$。由于**旋转的代数性质**，最终结果只依赖于 $(i - j)$——天然编码**相对位置**。具体实现：
 - 对 $q, k$ 的相邻两维做 $\begin{pmatrix} \cos & -\sin \\ \sin & \cos \end{pmatrix}$ 旋转。
@@ -114,9 +114,9 @@ LLaMA、Mistral 等现代 LLM 不再用 sinusoidal，而是**把 Q、K 向量按
 
 BLOOM 等模型使用更简单的方案：直接把**与距离成正比的偏置**加到 attention logits 上：
 
-```math
+$$
 \text{score}_{ij} = q_i^\top k_j - m \cdot |i - j|
-```
+$$
 
 $m$ 是一个固定的"斜率"，无需学习。优势是极其简单、显存友好，缺点是建模能力上限低于 RoPE。
 
@@ -124,9 +124,9 @@ $m$ 是一个固定的"斜率"，无需学习。优势是极其简单、显存�
 
 每个 sublayer 的标准形式（Post-LN）为：
 
-```math
+$$
 \text{output} = \text{LayerNorm}\bigl( x + \text{Sublayer}(x) \bigr)
-```
+$$
 
 `Sublayer` 可以是 Multi-Head Attention 或 Feed-Forward。**残差连接 + LayerNorm** 让信息可绕过非线性直接传向输出，是训练深层网络的关键（详见 ResNet 系列文章）。
 
@@ -166,13 +166,13 @@ $m$ 是一个固定的"斜率"，无需学习。优势是极其简单、显存�
 
 完整前向公式：
 
-```math
+$$
 x' = \text{LayerNorm}\bigl(x + \text{MHA}(x)\bigr)     \quad\text{(Pre-LN)}
-```
+$$
 
-```math
+$$
 y   = \text{LayerNorm}\bigl(x' + \text{FFN}(x')\bigr)
-```
+$$
 
 Encoder 内的 self-attention 是**双向**的——每个位置可以看其他所有位置，没有 mask。堆叠 $N$ 层（原始论文 $N=6$），最后一层输出作为 encoder 的最终表示，送给 decoder 的 cross-attention。
 
@@ -200,13 +200,13 @@ Decoder block 比 encoder 复杂：三个子层而不是两个。
 
 第 $t$ 步只能看到 $1 \dots t$，使用 causal mask：
 
-```math
+$$
 \text{CausalMask}_{ij} = \begin{cases} 0, & j \le i \\ -\infty, & j > i \end{cases}
-```
+$$
 
-```math
+$$
 \text{masked-Attn} = \text{softmax}\!\left(\frac{Q K^\top}{\sqrt{d_k}} + M\right) V
-```
+$$
 
 矩阵下三角有效、上三角被屏蔽——这是 GPT 系列自回归生成的核心机制（[attention-mechanism-explained.md](attention-mechanism-explained.md) 第六节给了详细示例）。
 
@@ -214,13 +214,13 @@ Decoder block 比 encoder 复杂：三个子层而不是两个。
 
 Decoder 用自己的隐状态作为 $Q$，Encoder 的输出作为 $K, V$：
 
-```math
+$$
 Q = y\, W^Q,\quad K = \text{enc}\, W^K,\quad V = \text{enc}\, W^V
-```
+$$
 
-```math
+$$
 \text{CrossAttn}(y,\, \text{enc}) = \text{softmax}\!\left(\frac{Q K^\top}{\sqrt{d_k}}\right) V
-```
+$$
 
 直觉：**$Q$ 是"我（解码器）现在想知道什么"，$K, V$ 是"源文里有什么"**——cross-attention 让解码器每一步都重新检索源文的相关片段。翻译模型在这一步真正"读懂"源文。
 
@@ -236,9 +236,9 @@ Q = y\, W^Q,\quad K = \text{enc}\, W^K,\quad V = \text{enc}\, W^V
 
 每个 attention 子层后接一个**位置独立**的全连接网络：
 
-```math
+$$
 \text{FFN}(x) = \text{Activation}(x W_1 + b_1)\, W_2 + b_2
-```
+$$
 
 原始论文用 ReLU、内层维度 $d_{ff} = 4 d_{\text{model}}$（"expand 4× → contract"）：
 
@@ -249,17 +249,17 @@ Q = y\, W^Q,\quad K = \text{enc}\, W^K,\quad V = \text{enc}\, W^V
 
 直觉："**FFN 是模型存知识的地方**"——每个 token 的表示经过两层线性，相当于用一个键值表检索"对应的事实"。可以用 key-value 记忆的角度解释：
 
-```math
+$$
 \text{FFN}(x) \approx \sum_{f=1}^{d_{ff}} \mathbb{1}[x \approx k_f] \cdot v_f
-```
+$$
 
 $d_{ff}$ 越大，"记忆槽"越多。这就是为什么 LLM 容量与 FFN 维度高度相关。现代 LLM 常用 **SwiGLU**（带门控），详见 [gpt-vs-llama-architecture.md](gpt-vs-llama-architecture.md)。
 
 ## 七、Layer Normalization
 
-```math
+$$
 \text{LayerNorm}(x) = \gamma \cdot \frac{x - \mu}{\sqrt{\sigma^2 + \epsilon}} + \beta
-```
+$$
 
 其中 $\mu, \sigma^2$ 是**沿特征维度**（$d_{\text{model}}$）计算的均值与方差，每个 token 独立归一化。
 
@@ -284,9 +284,9 @@ $d_{ff}$ 越大，"记忆槽"越多。这就是为什么 LLM 容量与 FFN 维�
 
 最终 decoder 输出经过一个线性投影 + softmax 得到词表上的概率分布：
 
-```math
+$$
 P(\text{next token}) = \text{softmax}(W_{\text{out}} \cdot h_T)
-```
+$$
 
 其中 $W_{\text{out}} \in \mathbb{R}^{d_{\text{model}} \times |V|}$，通常与输入 embedding **权重共享**（"tied embeddings"），节省参数。
 
