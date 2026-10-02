@@ -5,6 +5,13 @@
 
 本目录用于存放与「Asr」相关的学习资料。
 
+## 文章列表
+
+- [ASR基础：从GMM-HMM到CTC的演进](./asr-foundations.md)
+- [端到端ASR：Transformer-Transducer与Conformer](./asr-end-to-end.md)
+- [Whisper与多任务统一ASR](./asr-whisper-llm.md)
+- [ASR评估、解码与部署优化](./asr-evaluation.md)
+
 ## 收录范围
 
 - 教材与讲义（Markdown / PDF）

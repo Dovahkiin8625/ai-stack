@@ -11,6 +11,11 @@
 - 论文（PDF）
 - 讲稿与笔记（Markdown / Word / PPTX）
 
+## 文章列表
+
+- [CNN 演进之路：从 LeNet 到 ResNet 的架构与思想](./cnn-resnet.md)
+- [Vision Transformer 与现代视觉架构：从 ViT 到 ConvNeXt](./vision-transformer.md)
+
 ## 命名约定
 
 - 每个子主题一个文件夹，文件夹命名用 kebab-case。

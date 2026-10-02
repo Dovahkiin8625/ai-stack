@@ -11,6 +11,11 @@
 - 论文（PDF）
 - 讲稿与笔记（Markdown / Word / PPTX）
 
+## 文章列表
+
+- [检测基础文章](./detection-fundamentals.md)
+- [DETR文章](./detr-detection-transformer.md)
+
 ## 命名约定
 
 - 每个子主题一个文件夹，文件夹命名用 kebab-case。

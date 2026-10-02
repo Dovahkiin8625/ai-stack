@@ -11,6 +11,11 @@
 - 论文（PDF）
 - 讲稿与笔记（Markdown / Word / PPTX）
 
+## 文章列表
+
+- [NeRF与3D表示：从体渲染到3D Gaussian Splatting](./nerf-3d-representation.md)
+- [3D预训练与多模态融合：从PointNet到3D-LLM](./3d-pretraining-multimodal.md)
+
 ## 命名约定
 
 - 每个子主题一个文件夹，文件夹命名用 kebab-case。

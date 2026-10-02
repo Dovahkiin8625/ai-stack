@@ -11,6 +11,11 @@
 - 论文（PDF）
 - 讲稿与笔记（Markdown / Word / PPTX）
 
+## 文章列表
+
+- [GAN基础文章](./gan-fundamentals.md)
+- [扩散模型文章](./diffusion-models-stable-diffusion.md)
+
 ## 命名约定
 
 - 每个子主题一个文件夹，文件夹命名用 kebab-case。

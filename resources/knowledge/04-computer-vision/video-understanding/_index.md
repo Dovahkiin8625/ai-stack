@@ -11,6 +11,11 @@
 - 论文（PDF）
 - 讲稿与笔记（Markdown / Word / PPTX）
 
+## 文章列表
+
+- [视频识别基础：从双流网络到 SlowFast](./video-recognition.md)
+- [Video Transformer 与时序建模](./video-transformers.md)
+
 ## 命名约定
 
 - 每个子主题一个文件夹，文件夹命名用 kebab-case。

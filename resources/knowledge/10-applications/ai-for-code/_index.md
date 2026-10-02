@@ -16,3 +16,9 @@
 - 每个子主题一个文件夹，文件夹命名用 kebab-case。
 - 每个文件夹下放一个 `_index.md` 作为目录索引（阶段 2 由索引生成器读取）。
 - 文件名建议：`YYYY-MM-DD-<title>.md` 或原文件名。
+
+## 文章列表
+
+- [代码大模型：从补全到 Copilot](./code-llms.md)
+- [代码 RAG：用检索增强代码生成](./code-rag.md)
+- [代码 Agent：让 LLM 自主完成编程任务](./code-agents.md)

@@ -16,3 +16,9 @@
 - 每个子主题一个文件夹，文件夹命名用 kebab-case。
 - 每个文件夹下放一个 `_index.md` 作为目录索引（阶段 2 由索引生成器读取）。
 - 文件名建议：`YYYY-MM-DD-<title>.md` 或原文件名。
+
+## 文章列表
+
+- [AWS AI/ML 云平台：Bedrock、SageMaker 与自研芯片](./aws-bedrock-sagemaker.md)
+- [Azure AI Foundry：从 Azure OpenAI 到模型目录与 Agent 服务](./azure-ai-foundry.md)
+- [GCP Vertex AI：Gemini 多模态与 TPU 自研芯片](./gcp-vertex-ai.md)
