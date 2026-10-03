@@ -1,7 +1,7 @@
 use ai_stack_lib::readers::markdown::extract;
-use ai_stack_lib::readers::pdf::extract as pdf_extract;
-use ai_stack_lib::readers::docx::extract as docx_extract;
-use ai_stack_lib::readers::pptx::extract as pptx_extract;
+use ai_stack_lib::readers::pdf::count_pages as pdf_count_pages;
+use ai_stack_lib::readers::docx::word_count as docx_word_count;
+use ai_stack_lib::readers::pptx::slide_count as pptx_slide_count;
 use std::path::PathBuf;
 
 /// 与 `readers::markdown::BACKSLASH_PH` 保持同步的 PUA 占位符；
@@ -46,61 +46,29 @@ fn markdown_renders_gfm_table() {
 }
 
 #[test]
-fn pdf_returns_pages_or_falls_back() {
-    let result = pdf_extract(&fixture("sample.pdf"));
-    match result {
-        Ok((pages, count)) => {
-            assert!(count >= 1);
-            // 若 pdfium 缺失则 pages 为空向量
-            if !pages.is_empty() {
-                assert!(pages[0].1.starts_with("data:image/png;base64,"));
-            }
-        }
+fn pdf_count_pages_works() {
+    // 前端 PDF 改用 pdf.js 渲染，后端只数页数（用 pdf-extract 文本分页）。
+    let count = pdf_count_pages(&fixture("sample.pdf"));
+    match count {
+        Ok(n) => assert!(n >= 1, "got {n} pages"),
         Err(_) => {
-            // 也可接受：失败时不 panic
+            // 也可接受：fixture 不是真正的 PDF（pdf-extract 失败）
         }
     }
 }
 
 #[test]
-fn docx_extracts_headings_and_paragraphs() {
-    let (blocks_value, words) = docx_extract(&fixture("sample.docx")).unwrap();
-    let blocks = blocks_value.as_array().expect("blocks is array");
-    let kinds: Vec<&str> = blocks.iter()
-        .map(|b| b.get("kind").and_then(|v| v.as_str()).unwrap_or(""))
-        .collect();
-    assert!(kinds.contains(&"heading"), "kinds: {kinds:?}");
-    assert!(kinds.contains(&"paragraph"), "kinds: {kinds:?}");
-    assert!(kinds.contains(&"table"), "kinds: {kinds:?}");
-    assert!(words > 0);
+fn docx_word_count_is_positive() {
+    // docx reader 只数 word 数 —— 结构化 blocks 由前端 mammoth.js 生成。
+    let nodes = docx_word_count(&fixture("sample.docx")).unwrap();
+    assert!(nodes > 0, "got {nodes}");
 }
 
 #[test]
-fn pptx_extracts_slides() {
-    let (value, _) = pptx_extract(&fixture("sample.pptx")).unwrap();
-    // Pptx extractor returns the slides array directly (NOT wrapped in {"slides", "slide_count"}).
-    // Wrapping was a bug: frontend `slides[idx].index` then crashed on undefined.
-    let slides = value.as_array().expect("value is the slides array directly");
-    assert!(slides.len() >= 2, "got {} slides", slides.len());
-    let first = &slides[0];
-    assert!(first.get("title").is_some());
-    let body = first.get("body").and_then(|v| v.as_array()).unwrap();
-    assert!(!body.is_empty(), "body empty");
-}
-
-#[test]
-fn pptx_value_is_array_not_wrapped_object() {
-    // Regression: previously pptx_extract returned a wrapped object
-    // `{"slides": [...], "slide_count": N}` which broke PptxReader.tsx.
-    let (value, _) = pptx_extract(&fixture("sample.pptx")).unwrap();
-    assert!(
-        value.is_array(),
-        "pptx value should be the slides array, not a wrapper object"
-    );
-    assert!(
-        value.get("slides").is_none(),
-        "value must not be wrapped in {{'slides': ...}}"
-    );
+fn pptx_slide_count_is_at_least_two() {
+    // pptx reader 只数 slide 数 —— 实际渲染由前端 pptxviewjs 完成。
+    let count = pptx_slide_count(&fixture("sample.pptx")).unwrap();
+    assert!(count >= 2, "got {count}");
 }
 
 /// 回归守卫：math 代码块必须用 ``` 收尾，不能用 `$$` 当收尾。

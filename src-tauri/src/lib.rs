@@ -30,6 +30,7 @@ pub fn run() {
             commands::list_categories,
             commands::list_resources,
             commands::read_resource,
+            commands::read_resource_bytes,
             commands::list_notes,
             commands::create_note,
             commands::update_note,

@@ -37,13 +37,11 @@ sha2 = "0.10"
 hex = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 comrak = { version = "0.22", default-features = false, features = ["shortcodes"] }
-pdfium-render = "0.8"
+# PDF 渲染由前端 pdf.js 承担；后端只用 pdf-extract 数页（纯 Rust，无 native 依赖）
 pdf-extract = "0.7"
 docx-rs = "0.4"
 zip = { version = "2", default-features = false, features = ["deflate"] }
 quick-xml = { version = "0.36", features = ["serialize"] }
-base64 = "0.22"
-image = { version = "0.25", default-features = false, features = ["png"] }
 
 [dev-dependencies]
 tempfile = "3"

@@ -25,6 +25,40 @@ export async function readResource(id: number): Promise<ResourceContent> {
   return invoke<ResourceContent>('read_resource', { id });
 }
 
+/**
+ * 返回资源的原始字节，供前端 reader 自己解析：
+ * - PDF：pdf.js `getDocument({data})` 直接渲染 + 自带 text layer
+ * - DOCX：mammoth.js `convertToHtml({arrayBuffer})` → semantic HTML
+ * - PPTX：pptxviewjs `loadFromArrayBuffer(...)` → canvas 翻页
+ *
+ * Tauri 2 不同 IPC 路径返回不同 JS 类型，归一化由调用方负责（见 PdfReader.tsx）。
+ * 只支持 pdf / docx / pptx；其它 reader 类型不通过此命令传输字节流。
+ */
+export async function readResourceBytes(id: number): Promise<Uint8Array | ArrayBuffer | number[]> {
+  return invoke('read_resource_bytes', { id });
+}
+
+/**
+ * PDF 单页栅格化 —— 已废弃。
+ *
+ * 老实现：后端用 pdfium 栅格化单页 → PNG bytes → 前端 canvas + ImageBitmap 显示。
+ * 缺点：纯图像层，无法选中文本。
+ *
+ * 新实现：前端 pdf.js 直接渲染 PDF（拿到原始字节 → `getDocument({data})`），自带 text layer。
+ * 见 `readResourceBytes` 与 `PdfReader.tsx`。
+ *
+ * 保留函数签名只是为了让其他模块引用不报 TS 错；调用时会抛后端 "command not found"。
+ */
+export async function renderPdfPage(
+  _resourceId: number,
+  _pageIndex: number,
+  _targetWidthPx: number,
+): Promise<never> {
+  throw new Error(
+    'renderPdfPage 已废弃：PDF 改用前端 pdf.js 渲染，请调用 readResourceBytes 并交给 PdfReader',
+  );
+}
+
 export async function listNotes(resourceId: number): Promise<Note[]> {
   return invoke<Note[]>('list_notes', { resourceId });
 }

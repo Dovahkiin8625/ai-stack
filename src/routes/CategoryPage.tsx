@@ -61,6 +61,7 @@ export default function CategoryPage() {
 
   const selectResource = useLibraryStore((s) => s.selectResource);
   const resourceContent = useLibraryStore((s) => s.resourceContent);
+  const loadingResource = useLibraryStore((s) => s.loadingResource);
   const error = useLibraryStore((s) => s.error);
 
   useEffect(() => {
@@ -245,22 +246,27 @@ export default function CategoryPage() {
                 )}
                 {resourceContent.type === 'pdf' && (
                   <PdfReader
-                    pages={resourceContent.pages}
+                    resourceId={selectedResource.id}
                     pageCount={resourceContent.pageCount}
                   />
                 )}
                 {resourceContent.type === 'docx' && (
                   <DocxReader
-                    blocks={resourceContent.blocks}
+                    resourceId={selectedResource.id}
                     wordCount={resourceContent.wordCount}
                   />
                 )}
                 {resourceContent.type === 'pptx' && (
                   <PptxReader
-                    slides={resourceContent.slides}
+                    resourceId={selectedResource.id}
                     slideCount={resourceContent.slideCount}
                   />
                 )}
+              </div>
+            ) : loadingResource ? (
+              <div className="flex h-full items-center justify-center gap-2 text-sm text-text-muted">
+                <span className="h-4 w-4 animate-spin rounded-full border-2 border-border border-t-primary" />
+                正在加载 {selectedResource.title}…
               </div>
             ) : (
               <div className="m-4 flex items-start gap-2 rounded-md border border-red-300 bg-red-50 p-4 text-sm text-red-700">

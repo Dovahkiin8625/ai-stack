@@ -1,73 +1,61 @@
 use anyhow::{Context, Result};
-use serde_json::{json, Value};
 use std::path::Path;
 
-pub fn extract(path: &Path) -> Result<(Value, usize)> {
+/// 数 docx 里的 "word 数"。
+///
+/// docx 是 zip 包，文字都存在 `word/document.xml`。粗略做法：把所有 text
+/// 节点串起来按空白 split —— 跟之前 markdown / PDF reader 数 word 数同策略，
+/// DB 索引和 UI 显示只要"大致多少字"，不需要真正按 Word 的"word delimiter"
+/// 算法去数。
+///
+/// 这里不再返回任何 blocks —— DOCX 的格式化渲染交给前端 mammoth.js，
+/// 见 `src/components/library/reader/DocxReader.tsx`。
+pub fn word_count(path: &Path) -> Result<usize> {
     let bytes = std::fs::read(path)
         .with_context(|| format!("read {}", path.display()))?;
     let docx = docx_rs::read_docx(&bytes)
         .with_context(|| format!("parse docx {}", path.display()))?;
-    let mut blocks: Vec<Value> = Vec::new();
     let mut all_text = String::new();
-
     for child in docx.document.children.iter() {
-        match child {
-            docx_rs::DocumentChild::Paragraph(p) => {
-                let text = collect_text(&p.children);
-                all_text.push_str(&text);
-                all_text.push(' ');
-                if let Some(style) = p.property.style.as_ref().map(|s| s.val.to_string()) {
-                    let level = match style.as_str() {
-                        "Heading1" => Some(1),
-                        "Heading2" => Some(2),
-                        "Heading3" => Some(3),
-                        _ => None,
-                    };
-                    if let Some(lvl) = level {
-                        blocks.push(json!({"kind":"heading","level":lvl,"text":text}));
-                        continue;
-                    }
-                }
-                blocks.push(json!({"kind":"paragraph","text":text}));
-            }
-            docx_rs::DocumentChild::Table(t) => {
-                let mut rows: Vec<Vec<String>> = Vec::new();
-                for row_child in &t.rows {
-                    let docx_rs::TableChild::TableRow(row) = row_child;
-                    let mut cells: Vec<String> = Vec::new();
-                    for cell_child in &row.cells {
-                        let docx_rs::TableRowChild::TableCell(cell) = cell_child;
-                        let mut cell_text = String::new();
-                        for c in &cell.children {
-                            if let docx_rs::TableCellContent::Paragraph(pp) = c {
-                                cell_text.push_str(&collect_text(&pp.children));
-                                cell_text.push('\n');
-                            }
+        if let DocumentChildOwned::Paragraph(p) = child {
+            for r in &p.children {
+                if let ParagraphChildOwned::Run(run) = r {
+                    for tc in &run.children {
+                        if let RunChildOwned::Text(t) = tc {
+                            all_text.push_str(&t.text);
+                            all_text.push(' ');
                         }
-                        cells.push(cell_text.trim().to_string());
                     }
-                    rows.push(cells);
                 }
-                blocks.push(json!({"kind":"table","rows":rows}));
             }
-            _ => {}
         }
     }
-
-    let words = all_text.split_whitespace().count();
-    Ok((Value::Array(blocks), words))
+    Ok(all_text.split_whitespace().count())
 }
 
-fn collect_text(runs: &[docx_rs::ParagraphChild]) -> String {
-    let mut out = String::new();
-    for r in runs {
-        if let docx_rs::ParagraphChild::Run(run) = r {
-            for tc in &run.children {
-                if let docx_rs::RunChild::Text(t) = tc {
-                    out.push_str(&t.text);
-                }
-            }
-        }
+// === Re-exports so `word_count` only needs to import what it touches. ===
+use docx_rs::DocumentChild as DocumentChildOwned;
+use docx_rs::ParagraphChild as ParagraphChildOwned;
+use docx_rs::RunChild as RunChildOwned;
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn fixture(name: &str) -> std::path::PathBuf {
+        let mut p = std::path::PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        p.push("tests");
+        p.push("fixtures");
+        p.push("readers");
+        p.push(name);
+        p
     }
-    out
+
+    #[test]
+    fn docx_word_count_is_positive() {
+        // 不精确断言具体数字（docx-rs 抽取后中文按 token 计未必分得清），
+        // 只验证能成功 parse 且 word 数 > 0。
+        let n = word_count(&fixture("sample.docx")).unwrap();
+        assert!(n > 0, "got {n}");
+    }
 }

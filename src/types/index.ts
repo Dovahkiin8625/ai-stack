@@ -33,27 +33,17 @@ export type ResourceContent =
   | { type: 'markdown'; html: string; wordCount: number }
   | {
       type: 'pdf';
-      pages: Array<{ index: number; dataUrl: string }>;
+      /** 总页数（read_resource 一次性返回，避免栅格化所有页的 ~22s 延迟）。 */
       pageCount: number;
     }
   | {
       type: 'docx';
-      blocks: Array<
-        | { kind: 'heading'; level: 1 | 2 | 3; text: string }
-        | { kind: 'paragraph'; text: string }
-        | { kind: 'list'; ordered: boolean; items: string[] }
-        | { kind: 'table'; rows: string[][] }
-      >;
+      /** 仅作统计/展示用 —— 实际渲染由前端 mammoth.js 完成，详见 DocxReader。 */
       wordCount: number;
     }
   | {
       type: 'pptx';
-      slides: Array<{
-        index: number;
-        title: string | null;
-        body: string[];
-        notes: string | null;
-      }>;
+      /** 仅作统计/展示用 —— 实际渲染由前端 pptxviewjs 完成，详见 PptxReader。 */
       slideCount: number;
     };
 

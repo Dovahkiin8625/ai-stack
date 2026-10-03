@@ -205,6 +205,35 @@ pub fn read_resource(id: i64, app: AppHandle) -> Result<ResourceContent, String>
     reader::read(&abs, &kind).map_err(|e| format!("read {}: {e:#}", abs.display()))
 }
 
+/// 返回资源的原始字节。
+///
+/// 三类 reader 都用它拿原文件自己渲染：
+/// - PDF：前端 pdf.js `getDocument({data})`，自带 text layer 支持选中/复制
+/// - DOCX：前端 mammoth.js 把 docx → semantic HTML（保留 bold/italic/headings/lists/tables/images）
+/// - PPTX：前端 pptxviewjs 把 pptx → canvas slide（按 slide 翻页，完整保留版式）
+///
+/// markdown reader 不走这里（后端已经返回 html）。
+#[tauri::command]
+pub fn read_resource_bytes(id: i64, app: AppHandle) -> Result<Vec<u8>, String> {
+    let state: tauri::State<AppState> = app.state();
+    let db = Db::open(&state.db_path).map_err(|e| e.to_string())?;
+    let (category_path, rel_path, kind) = db
+        .conn
+        .query_row(
+            "SELECT category_path, rel_path, type FROM resources WHERE id = ?1",
+            [id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
+        )
+        .map_err(|e| format!("resource {id} not found: {e}"))?;
+    if !matches!(kind.as_str(), "pdf" | "docx" | "pptx") {
+        return Err(format!(
+            "read_resource_bytes 仅支持 PDF/DOCX/PPTX，resource {id} 是 {kind}"
+        ));
+    }
+    let abs = reader::resolve_absolute(&state.knowledge_root, &category_path, &rel_path);
+    std::fs::read(&abs).map_err(|e| format!("read {}: {e}", abs.display()))
+}
+
 #[tauri::command]
 pub fn list_notes(resource_id: i64, app: AppHandle) -> Result<Vec<NoteDto>, String> {
     let state: tauri::State<AppState> = app.state();
@@ -739,7 +768,10 @@ pub fn build_state(app: &AppHandle) -> AppState {
     let cwd = std::env::current_dir().unwrap_or_default();
     let knowledge_root = find_knowledge_root(&cwd)
         .unwrap_or_else(|| cwd.join("resources").join("knowledge"));
-    AppState { db_path, knowledge_root }
+    AppState {
+        db_path,
+        knowledge_root,
+    }
 }
 
 /// 从 `start` 向上查找 `resources/knowledge/` 目录。
