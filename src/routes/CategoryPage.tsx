@@ -3,7 +3,6 @@ import { useParams } from 'react-router-dom';
 import { AlertCircle } from 'lucide-react';
 import { listen, type UnlistenFn } from '@tauri-apps/api/event';
 import * as api from '../lib/library-api';
-import { CATEGORIES } from '../data/categories';
 import { useLibraryStore } from '../stores/library';
 import { useNotesStore } from '../stores/notes';
 import { getSettings } from '../lib/tauri';
@@ -17,6 +16,9 @@ import PptxReader from '../components/library/reader/PptxReader';
 import NotesPanel, {
   type NotesPanelHandle,
 } from '../components/library/NotesPanel';
+import ArticleIndexView, {
+  type ArticleIndexSection,
+} from '../components/library/ArticleIndexView';
 
 export default function CategoryPage() {
   const { category, subPath, article } = useParams<{
@@ -25,11 +27,17 @@ export default function CategoryPage() {
     article?: string;
   }>();
 
+  // 分类从 DB 派生（scanner 从 resources/knowledge/ 实际目录 + _index.md H1 派生）
+  const categories = useLibraryStore((s) => s.categories);
+
   const topCategory = useMemo(
-    () => CATEGORIES.find((c) => c.path === category) ?? null,
-    [category],
+    () => categories.find((c) => c.parentPath === null && c.path === category) ?? null,
+    [categories, category],
   );
-  const subCategories = topCategory?.children ?? [];
+  const subCategories = useMemo(
+    () => (topCategory ? categories.filter((c) => c.parentPath === topCategory.path) : []),
+    [categories, topCategory],
+  );
 
   const currentSub = useMemo(() => {
     if (subPath) {
@@ -187,6 +195,24 @@ export default function CategoryPage() {
     );
   }
 
+  // 未选中具体文章时，中间区域展示该目录下所有文档的 index：
+  // - 有 subPath → 单组视图（该子分类的文章）
+  // - 只有 category → 分组视图（按子分类分组，每组是该子分类的文章）
+  const indexSections: ArticleIndexSection[] =
+    subPath && currentFullPath
+      ? [
+          {
+            title: currentSub?.title ?? subPath,
+            categoryPath: currentFullPath,
+            articles: articlesByPath[currentFullPath],
+          },
+        ]
+      : subCategories.map((sub) => ({
+          title: sub.title,
+          categoryPath: sub.path,
+          articles: articlesByPath[sub.path],
+        }));
+
   return (
     <div className="flex h-full flex-col">
       {selectedResource ? (
@@ -286,9 +312,10 @@ export default function CategoryPage() {
           />
         </>
       ) : (
-        <div className="flex h-full items-center justify-center p-6 text-sm text-text-muted">
-          选择左侧文章开始阅读
-        </div>
+        <ArticleIndexView
+          mode={subPath ? 'single' : 'grouped'}
+          sections={indexSections}
+        />
       )}
     </div>
   );

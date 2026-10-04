@@ -17,14 +17,8 @@
 - [GPT 与 BERT 的演化](./gpt-and-bert-evolution.md) — MLM 与 CLM 的差异、encoder-only / decoder-only / encoder-decoder 三种范式、为什么 decoder-only 赢得主流。
 - [GPT vs LLaMA：现代开源 LLM 的架构差异](./gpt-vs-llama-architecture.md) — 绝对位置编码 vs RoPE、LayerNorm vs RMSNorm、GeLU vs SwiGLU、MHA vs GQA、KV Cache 推理优化。
 
-## 收录范围
+## 三方资料
 
-- 教材与讲义（Markdown / PDF）
-- 论文（PDF）
-- 讲稿与笔记（Markdown / Word / PPTX）
-
-## 命名约定
-
-- 每个子主题一个文件夹，文件夹命名用 kebab-case。
-- 每个文件夹下放一个 `_index.md` 作为目录索引（阶段 2 由索引生成器读取）。
-- 文件名建议：`YYYY-MM-DD-<title>.md` 或原文件名。
+- [Attention Is All You Need](./三方资料/Attention_Is_All_You_Need.pdf) — Vaswani et al. 2017 Transformer 原始论文，奠基之作。
+- [Stable Diffusion 讲解稿](./三方资料/sd1.pptx) — Latent Diffusion 模型的图文讲解。
+- [Transformer 综述讲义](./三方资料/transformer.docx) — Transformer 架构详细讲义（Word 文档）。

@@ -23,10 +23,59 @@ export interface Resource {
   type: ResourceType;
   title: string;
   sizeBytes: number;
-  hash: string;
   indexedAt: string;
   pageCount: number | null;
   wordCount: number | null;
+}
+
+/**
+ * `_index.md` 解析后的一条目：rel_path 与 Resource.relPath 一致（去掉 `./` 前缀），
+ * 用来在目录列表里给每篇文档配一行简介。description 为 null 表示 _index.md
+ * 里没写描述，UI 退化为只显示标题。
+ */
+export interface IndexEntry {
+  relPath: string;
+  title: string;
+  description: string | null;
+}
+
+/**
+ * `_index.md` 解析后的一个 ### 子分组。
+ * - `subheading` 为 null 表示该 ## section 下没有 ### 子标题，entries 直接挂在 ## 下
+ * - `entries` 是该子分组下的文章条目
+ * - `rawMarkdown` 是该 ### 下的非条目 markdown（段落 / 非链接 bullet），原样渲染
+ */
+export interface ParsedGroup {
+  subheading: string | null;
+  entries: IndexEntry[];
+  rawMarkdown: string;
+}
+
+/**
+ * `_index.md` 解析后的一个 ## section。
+ * - `heading` 是 ## 标题（原文照录，parser 不假设任何特定名字）
+ * - `groups` 是该 section 下的 ### 子分组（无 ### 时为单个默认 group）
+ * - `rawMarkdown` 是该 ## 下的非条目 markdown（说明性段落、非链接 bullet 等）
+ */
+export interface ParsedSection {
+  heading: string;
+  groups: ParsedGroup[];
+  rawMarkdown: string;
+}
+
+/**
+ * `_index.md` 完整解析结果 —— ArticleIndexView 严格按此结构渲染：
+ * - 页面 H1 = `title`，H1~## 之间的前言 = `preamble`（含 blockquote）
+ * - 每个 ## section 按出现顺序渲染；sections 内部按 ### 子分组渲染
+ * - 用户编辑 _index.md 后重新调用 readSubcategoryIndex 即可看到变更（不监听文件变更）
+ */
+export interface SubcategoryIndex {
+  /** # H1 标题；null 表示文件没 H1 */
+  title: string | null;
+  /** H1 与第一个 ## 之间的 markdown（含 blockquote / 段落） */
+  preamble: string | null;
+  /** 全部 ## sections（按文件顺序） */
+  sections: ParsedSection[];
 }
 
 export type ResourceContent =
@@ -55,7 +104,7 @@ export interface ScanSummary {
 }
 
 export interface ScanProgress {
-  phase: 'walking' | 'hashing' | 'inserting' | 'done';
+  phase: 'walking' | 'done';
   current: number;
   total: number;
   currentPath?: string;

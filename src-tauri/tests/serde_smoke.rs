@@ -32,7 +32,6 @@ fn resource_dto_serializes_camel_case() {
         r#type: "markdown".into(),
         title: "Notes".into(),
         size_bytes: 1024,
-        hash: "abc".into(),
         indexed_at: "2026-09-29T00:00:00Z".into(),
         page_count: None,
         word_count: Some(120),
@@ -43,6 +42,7 @@ fn resource_dto_serializes_camel_case() {
     }
     assert!(!json.contains("category_path"), "snake_case leaked: {json}");
     assert!(!json.contains("word_count"), "snake_case leaked: {json}");
+    assert!(!json.contains("\"hash\""), "stale hash field leaked: {json}");
 }
 
 #[test]
@@ -54,7 +54,12 @@ fn scan_summary_serializes_camel_case() {
         duration_ms: 42,
     };
     let json = serde_json::to_string(&s).expect("serialize");
-    for camel in ["categoriesCount", "resourcesCount", "errorsCount", "durationMs"] {
+    for camel in [
+        "categoriesCount",
+        "resourcesCount",
+        "errorsCount",
+        "durationMs",
+    ] {
         assert!(json.contains(camel), "missing {camel}: {json}");
     }
     assert!(!json.contains("categories_count"), "snake_case leaked: {json}");

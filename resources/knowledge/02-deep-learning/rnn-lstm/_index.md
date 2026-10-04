@@ -16,14 +16,8 @@
 
 - [Seq2Seq 与注意力机制](./seq2seq-and-attention.md) — 编码器-解码器、上下文瓶颈、Bahdanau 加性注意力、Luong 乘性注意力、PyTorch 数字反转完整示例，"Attention Is All You Need" 的铺垫。
 
-## 收录范围
+## 三方资料
 
-- 教材与讲义（Markdown / PDF）
-- 论文（PDF）
-- 讲稿与笔记（Markdown / Word / PPTX）
-
-## 命名约定
-
-- 每个子主题一个文件夹，文件夹命名用 kebab-case。
-- 每个文件夹下放一个 `_index.md` 作为目录索引（阶段 2 由索引生成器读取）。
-- 文件名建议：`YYYY-MM-DD-<title>.md` 或原文件名。
+- [GRU 论文](./三方资料/gru.pdf) — Cho et al. 2014 提出的简化门控循环单元。
+- [LSTM 原始论文](./三方资料/lstm-1997.pdf) — Hochreiter & Schmidhuber 1997 提出长短期记忆网络。
+- [Seq2Seq 论文](./三方资料/seq2seq.pdf) — Sutskever et al. 2014 端到端序列到序列学习。

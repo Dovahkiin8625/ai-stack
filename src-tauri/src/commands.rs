@@ -52,7 +52,6 @@ pub struct ResourceDto {
     pub r#type: String,
     pub title: String,
     pub size_bytes: i64,
-    pub hash: String,
     pub indexed_at: String,
     pub page_count: Option<i64>,
     pub word_count: Option<i64>,
@@ -67,7 +66,6 @@ impl From<ResourceRow> for ResourceDto {
             r#type: r.r#type,
             title: r.title,
             size_bytes: r.size_bytes,
-            hash: r.hash,
             indexed_at: r.indexed_at,
             page_count: r.page_count,
             word_count: r.word_count,
@@ -232,6 +230,23 @@ pub fn read_resource_bytes(id: i64, app: AppHandle) -> Result<Vec<u8>, String> {
     }
     let abs = reader::resolve_absolute(&state.knowledge_root, &category_path, &rel_path);
     std::fs::read(&abs).map_err(|e| format!("read {}: {e}", abs.display()))
+}
+
+/// 读取子分类目录下的 `_index.md` 并解析为 `[{ relPath, title, description }]`。
+///
+/// 给中间区目录列表的"每行附带描述"用。
+/// 不入库（编辑 `_index.md` 不必触发重扫），每次调用现读现解析，路径 1KB 内的文件
+/// 解析开销可以忽略；前端按 categoryPath 在 store 里缓存。
+#[tauri::command]
+pub fn read_subcategory_index(
+    category_path: String,
+    app: AppHandle,
+) -> Result<crate::readers::index_md::ParsedIndex, String> {
+    let state: tauri::State<AppState> = app.state();
+    // _index.md 在该子分类目录下，文件名固定。
+    let abs = state.knowledge_root.join(&category_path).join("_index.md");
+    crate::readers::index_md_parse_file(&abs)
+        .map_err(|e| format!("parse _index.md for {category_path}: {e:#}"))
 }
 
 #[tauri::command]

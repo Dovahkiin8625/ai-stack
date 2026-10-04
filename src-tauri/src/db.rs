@@ -19,7 +19,6 @@ pub struct ResourceRow {
     pub r#type: String,
     pub title: String,
     pub size_bytes: i64,
-    pub hash: String,
     pub indexed_at: String,
     pub page_count: Option<i64>,
     pub word_count: Option<i64>,
@@ -32,7 +31,9 @@ pub struct ResourceInput {
     pub r#type: String,
     pub title: String,
     pub size_bytes: i64,
-    pub hash: String,
+    /// Unix epoch seconds of last filesystem mtime at scan time.
+    /// scanner 用 (size, mtime) 比对判断是否需要重写 DB 行；存进 DB 供下次启动复用。
+    pub mtime: i64,
     pub page_count: Option<i64>,
     pub word_count: Option<i64>,
 }
@@ -88,7 +89,6 @@ impl Db {
                 type TEXT NOT NULL,
                 title TEXT NOT NULL,
                 size_bytes INTEGER NOT NULL,
-                hash TEXT NOT NULL,
                 indexed_at TEXT NOT NULL,
                 page_count INTEGER,
                 word_count INTEGER,
@@ -96,7 +96,8 @@ impl Db {
                 FOREIGN KEY (category_path) REFERENCES categories(path)
              );
              CREATE INDEX IF NOT EXISTS idx_resources_category ON resources(category_path);
-             CREATE INDEX IF NOT EXISTS idx_resources_hash ON resources(hash);
+             -- mtime 列在老库上不存在；新表直接建带 mtime 的版本，
+             -- 老表用下面的 ALTER 升级。两者只走一条。
              CREATE TABLE IF NOT EXISTS notes (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 resource_id INTEGER NOT NULL,
@@ -110,6 +111,18 @@ impl Db {
              );
              CREATE INDEX IF NOT EXISTS idx_notes_resource ON notes(resource_id);",
         )?;
+        // mtime 列在 v1 schema 里没有 —— 增量升级加在 resources 上。
+        // 同 notes.source 的处理方式：pragma 探测缺失后 ALTER ADD COLUMN。
+        let has_mtime: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('resources') WHERE name = 'mtime'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_mtime == 0 {
+            tx.execute("ALTER TABLE resources ADD COLUMN mtime INTEGER NOT NULL DEFAULT 0", [])?;
+        }
         // Phase 5 升级：旧版 notes 表没有 source 列。用 pragma 探测后按需 ALTER，
         // 避免 SQLite 不支持 ADD COLUMN 的 IF NOT EXISTS 时报错。
         let has_source: i64 = tx
@@ -157,13 +170,13 @@ impl Db {
         let now = chrono::Utc::now().to_rfc3339();
         self.conn.execute(
             "INSERT INTO resources (category_path, rel_path, type, title,
-                                    size_bytes, hash, indexed_at, page_count, word_count)
+                                    size_bytes, mtime, indexed_at, page_count, word_count)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
              ON CONFLICT(category_path, rel_path) DO UPDATE SET
                 type = excluded.type,
                 title = excluded.title,
                 size_bytes = excluded.size_bytes,
-                hash = excluded.hash,
+                mtime = excluded.mtime,
                 indexed_at = excluded.indexed_at,
                 page_count = excluded.page_count,
                 word_count = excluded.word_count",
@@ -173,18 +186,38 @@ impl Db {
                 r.r#type,
                 r.title,
                 r.size_bytes,
-                r.hash,
+                r.mtime,
                 now,
                 r.page_count,
                 r.word_count,
             ],
         )?;
-        let id: i64 = self.conn.query_row(
-            "SELECT id FROM resources WHERE category_path = ?1 AND rel_path = ?2",
-            params![r.category_path, r.rel_path],
-            |row| row.get(0),
-        )?;
+        // 之前这里再 query_row 一次 SELECT id —— scanner 端没用返回值，纯浪费一次往返。
+        // 改用 last_insert_rowid：INSERT 路径拿到新 id；UPDATE 路径 last_insert_rowid 不变（仍是当前行 id）。
+        // SQLite 在同一连接内 ON CONFLICT UPDATE 后 last_insert_rowid 会指向被改动的行，可信。
+        let id = self.conn.last_insert_rowid();
         Ok(id)
+    }
+
+    /// 返回现有资源 (size_bytes, mtime_secs) 的全量映射。
+    /// scanner 在 walk 之前调用，对每个文件做 (size, mtime) 比对：
+    /// - 一致 → 跳过，不读不写
+    /// - 不一致 / 不存在 → upsert
+    pub fn existing_resources_meta(
+        &self,
+    ) -> Result<std::collections::HashMap<(String, String), (i64, i64)>> {
+        let mut stmt = self.conn.prepare(
+            "SELECT category_path, rel_path, size_bytes, mtime FROM resources",
+        )?;
+        let rows = stmt
+            .query_map([], |row| {
+                Ok((
+                    (row.get::<_, String>(0)?, row.get::<_, String>(1)?),
+                    (row.get::<_, i64>(2)?, row.get::<_, i64>(3)?),
+                ))
+            })?
+            .collect::<rusqlite::Result<std::collections::HashMap<_, _>>>()?;
+        Ok(rows)
     }
 
     pub fn list_categories(&self) -> Result<Vec<CategoryRow>> {
@@ -208,7 +241,7 @@ impl Db {
     pub fn list_resources(&self, category_path: &str) -> Result<Vec<ResourceRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, category_path, rel_path, type, title,
-                    size_bytes, hash, indexed_at, page_count, word_count
+                    size_bytes, indexed_at, page_count, word_count
              FROM resources WHERE category_path = ?1
              ORDER BY rel_path",
         )?;
@@ -221,10 +254,9 @@ impl Db {
                     r#type: row.get(3)?,
                     title: row.get(4)?,
                     size_bytes: row.get(5)?,
-                    hash: row.get(6)?,
-                    indexed_at: row.get(7)?,
-                    page_count: row.get(8)?,
-                    word_count: row.get(9)?,
+                    indexed_at: row.get(6)?,
+                    page_count: row.get(7)?,
+                    word_count: row.get(8)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;

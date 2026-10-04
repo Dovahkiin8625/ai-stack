@@ -11,14 +11,7 @@
 - [反向传播算法](./backpropagation.md) — 计算图、链式法则、BPTT 推导、四大 BP 方程、矩阵化、向量化实现、梯度检验、PyTorch autograd。
 - [激活函数与损失函数](./activation-functions-and-loss.md) — Sigmoid/Tanh/ReLU 族、softmax、多分类交叉熵、MSE/CE 梯度量级分析、Focal Loss。
 
-## 收录范围
+## 三方资料
 
-- 教材与讲义（Markdown / PDF）
-- 论文（PDF）
-- 讲稿与笔记（Markdown / Word / PPTX）
-
-## 命名约定
-
-- 每个子主题一个文件夹，文件夹命名用 kebab-case。
-- 每个文件夹下放一个 `_index.md` 作为目录索引（阶段 2 由索引生成器读取）。
-- 文件名建议：`YYYY-MM-DD-<title>.md` 或原文件名。
+- [BatchNorm 论文](./三方资料/batchnorm.pdf) — Ioffe & Szegedy 2015 通过 mini-batch 归一化加速深层网络训练。
+- [Dropout 论文](./三方资料/dropout.pdf) — Srivastava et al. 2014 通过随机失活神经元防止过拟合。

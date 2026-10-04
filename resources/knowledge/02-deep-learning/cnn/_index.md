@@ -16,14 +16,7 @@
 
 - [现代 CNN：ConvNeXt、EfficientNet 与移动端](./modern-cnn-trends.md) — ViT 冲击、深度可分离卷积、MobileNet v1/v2/v3、EfficientNet 复合缩放、ConvNeXt 现代 ResNet、骨干网络选型指南。
 
-## 收录范围
+## 三方资料
 
-- 教材与讲义（Markdown / PDF）
-- 论文（PDF）
-- 讲稿与笔记（Markdown / Word / PPTX）
-
-## 命名约定
-
-- 每个子主题一个文件夹，文件夹命名用 kebab-case。
-- 每个文件夹下放一个 `_index.md` 作为目录索引（阶段 2 由索引生成器读取）。
-- 文件名建议：`YYYY-MM-DD-<title>.md` 或原文件名。
+- [EfficientNet 论文](./三方资料/efficientnet.pdf) — Tan & Le 2019 提出的复合缩放方法，统一缩放深度/宽度/分辨率。
+- [ResNet 论文](./三方资料/resnet.pdf) — He et al. 2015 提出的深度残差学习，ImageNet 图像分类里程碑。

@@ -34,7 +34,7 @@ fn upsert_resource_returns_stable_id_across_updates() {
         r#type: "markdown".into(),
         title: "Linear Algebra Notes".into(),
         size_bytes: 1024,
-        hash: "abc123".into(),
+        mtime: 0,
         page_count: None,
         word_count: None,
     };
@@ -42,9 +42,9 @@ fn upsert_resource_returns_stable_id_across_updates() {
     let id2 = db.upsert_resource(input.clone()).unwrap();
     assert_eq!(id1, id2, "upsert on identical key should return same id");
 
-    // 修改 hash 后 id 不变
+    // 修改 size_bytes 后 id 不变（hash 字段已删除，用 size 代替做差异验证）
     let mut changed = input;
-    changed.hash = "def456".into();
+    changed.size_bytes = 2048;
     let id3 = db.upsert_resource(changed).unwrap();
     assert_eq!(id1, id3);
 }
@@ -67,7 +67,8 @@ fn list_resources_filters_by_category() {
         rel_path: "a.md".into(),
         r#type: "markdown".into(),
         title: "A".into(),
-        size_bytes: 1, hash: "h1".into(),
+        size_bytes: 1,
+        mtime: 0,
         page_count: None, word_count: None,
     }).unwrap();
     db.upsert_resource(ResourceInput {
@@ -75,7 +76,8 @@ fn list_resources_filters_by_category() {
         rel_path: "b.md".into(),
         r#type: "markdown".into(),
         title: "B".into(),
-        size_bytes: 1, hash: "h2".into(),
+        size_bytes: 1,
+        mtime: 0,
         page_count: None, word_count: None,
     }).unwrap();
 
@@ -99,7 +101,8 @@ fn delete_missing_removes_rows_not_in_set() {
             rel_path: rel.into(),
             r#type: "markdown".into(),
             title: rel.into(),
-            size_bytes: 1, hash: format!("h-{rel}").into(),
+            size_bytes: 1,
+            mtime: 0,
             page_count: None, word_count: None,
         }).unwrap();
     }
@@ -121,7 +124,7 @@ fn fixture_with_resource(db: &mut Db) -> i64 {
         r#type: "markdown".into(),
         title: "A".into(),
         size_bytes: 1,
-        hash: "h".into(),
+        mtime: 0,
         page_count: None,
         word_count: None,
     }).unwrap()

@@ -1,79 +1,51 @@
 import { describe, it, expect } from 'vitest';
-import { CATEGORIES, type Category } from '../data/categories';
+import { CATEGORY_ICONS, iconForCategoryPath, type LucideIconName } from '../data/categories';
 
-function* walk(cats: Category[]): Generator<Category> {
-  for (const c of cats) {
-    yield c;
-    if (c.children.length > 0) yield* walk(c.children);
-  }
-}
+const KNOWN_TOP_PATHS = [
+  '01-foundations',
+  '02-deep-learning',
+  '03-large-language-models',
+  '04-computer-vision',
+  '05-nlp',
+  '06-speech-audio',
+  '07-ai-engineering',
+  '08-ai-agents',
+  '09-ai-safety',
+  '10-applications',
+  '11-tools-ecosystem',
+  '12-industry-trends',
+];
 
-describe('CATEGORIES', () => {
-  it('至少包含 12 个一级分类', () => {
-    expect(CATEGORIES.length).toBeGreaterThanOrEqual(12);
-  });
-
-  it('每个一级分类有 id、title、path、children 字段', () => {
-    for (const c of CATEGORIES) {
-      expect(c.id).toBeTruthy();
-      expect(c.title).toBeTruthy();
-      expect(c.path).toMatch(/^\d{2}-/);
-      expect(Array.isArray(c.children)).toBe(true);
+describe('CATEGORY_ICONS', () => {
+  it('所有已知一级分类 path 都有图标登记', () => {
+    for (const path of KNOWN_TOP_PATHS) {
+      expect(CATEGORY_ICONS[path], `missing icon for ${path}`).toBeTruthy();
     }
   });
 
-  it('一级分类 id 全局唯一', () => {
-    const ids = new Set<string>();
-    for (const c of CATEGORIES) ids.add(c.id);
-    expect(ids.size).toBe(CATEGORIES.length);
-  });
-
-  it('path 排序与 id 一致', () => {
-    const sorted = [...CATEGORIES].sort((a, b) => a.path.localeCompare(b.path));
-    expect(sorted.map((c) => c.path)).toEqual(CATEGORIES.map((c) => c.path));
-  });
-});
-
-describe('CATEGORIES 全树', () => {
-  const all = [...walk(CATEGORIES)];
-
-  it('包含子分类（不全为空）', () => {
-    const withChildren = all.filter((c) => c.children.length > 0);
-    expect(withChildren.length).toBeGreaterThanOrEqual(12);
-  });
-
-  it('全树 id 全局唯一（含子分类）', () => {
-    const ids = all.map((c) => c.id);
-    expect(new Set(ids).size).toBe(ids.length);
-  });
-
-  it('全树每个节点字段齐全', () => {
-    for (const c of all) {
-      expect(c.id, `id missing in ${c.path}`).toBeTruthy();
-      expect(c.title, `title missing in ${c.path}`).toBeTruthy();
-      expect(c.path, `path missing for ${c.id}`).toBeTruthy();
-      expect(c.path, `bad path format: ${c.path}`).toMatch(/^[a-z0-9-]+(\/[a-z0-9-]+)*$/);
-      expect(Array.isArray(c.children)).toBe(true);
-    }
-  });
-
-  it('一级 path 是二级 path 的前缀', () => {
-    for (const top of CATEGORIES) {
-      for (const child of top.children) {
-        expect(child.path.startsWith(top.path + '/')).toBe(true);
-      }
+  it('图标名是合法的 lucide-react 组件名集合之一', () => {
+    const validNames: LucideIconName[] = [
+      'BookOpen', 'Layers', 'MessageSquareText', 'Eye', 'Languages', 'Mic',
+      'Wrench', 'Bot', 'Shield', 'Sparkles', 'Package', 'TrendingUp',
+    ];
+    for (const [path, name] of Object.entries(CATEGORY_ICONS)) {
+      expect(validNames, `${path}: '${name}' 不是已知 lucide 图标名`).toContain(name);
     }
   });
 });
 
-describe('Category 类型', () => {
-  it('子分类可嵌套', () => {
-    const sample: Category = {
-      id: 'root',
-      title: '根',
-      path: '00-root',
-      children: [],
-    };
-    expect(sample.children).toEqual([]);
+describe('iconForCategoryPath', () => {
+  it('一级分类 path 直接命中', () => {
+    expect(iconForCategoryPath('02-deep-learning')).toBe('Layers');
+  });
+
+  it('子分类 path 命中其一级（最长前缀匹配）', () => {
+    expect(iconForCategoryPath('02-deep-learning/transformers')).toBe('Layers');
+    expect(iconForCategoryPath('04-computer-vision/3d-vision')).toBe('Eye');
+  });
+
+  it('未知 path 返回 undefined（UI 应优雅降级）', () => {
+    expect(iconForCategoryPath('99-unknown')).toBeUndefined();
+    expect(iconForCategoryPath('')).toBeUndefined();
   });
 });

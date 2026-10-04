@@ -1,4 +1,4 @@
-# Computer Science
+# 计算机科学
 
 > 分类：**基础理论** → **Computer Science**
 > 路径：`resources/knowledge/01-foundations/02-computer-science`
@@ -11,15 +11,3 @@
 - [复杂度分析](./complexity-analysis.md) — 渐近记号、主定理、平摊分析、空间复杂度、并行分布式复杂度、ML FLOPs 估算。
 - [操作系统与并发](./operating-systems-concurrency.md) — 进程/线程/协程、同步原语、内存模型、I/O 多路复用、CUDA 异构计算。
 - [分布式系统基础](./distributed-systems-fundamentals.md) — CAP、一致性、共识、复制/分片、分布式训练中的"分布式系统"问题与故障防御。
-
-## 收录范围
-
-- 教材与讲义（Markdown / PDF）
-- 论文（PDF）
-- 讲稿与笔记（Markdown / Word / PPTX）
-
-## 命名约定
-
-- 每个子主题一个文件夹，文件夹命名用 kebab-case。
-- 每个文件夹下放一个 `_index.md` 作为目录索引（阶段 2 由索引生成器读取）。
-- 文件名建议：`YYYY-MM-DD-<title>.md` 或原文件名。

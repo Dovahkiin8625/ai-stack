@@ -1,17 +1,17 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { NavLink, useLocation, useMatch } from 'react-router-dom';
 import {
   BookOpen, Layers, MessageSquareText, Eye, Languages, Mic,
   Wrench, Bot, Shield, Sparkles, Package, TrendingUp,
   ChevronRight, ChevronDown,
-  FileText, FileType, Presentation,
+  FileText, FileType, Presentation, RefreshCw,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
-import { CATEGORIES } from '../../data/categories';
+import { iconForCategoryPath, type LucideIconName } from '../../data/categories';
 import { useLibraryStore } from '../../stores/library';
-import type { ResourceType } from '../../types';
+import type { Category, ResourceType } from '../../types';
 
-const TOP_ICONS: Record<string, ComponentType<{ size?: number }>> = {
+const TOP_ICON_MAP: Record<LucideIconName, ComponentType<{ size?: number }>> = {
   BookOpen, Layers, MessageSquareText, Eye, Languages, Mic,
   Wrench, Bot, Shield, Sparkles, Package, TrendingUp,
 };
@@ -22,11 +22,6 @@ const RESOURCE_ICONS: Record<ResourceType, ComponentType<{ size?: number }>> = {
   docx: FileType,
   pptx: Presentation,
 };
-
-function categoryPathToSubSlug(category: string, fullPath: string): string {
-  if (fullPath.startsWith(`${category}/`)) return fullPath.slice(category.length + 1);
-  return fullPath;
-}
 
 export default function Sidebar() {
   const location = useLocation();
@@ -46,13 +41,33 @@ export default function Sidebar() {
   const activeSubPath =
     activeCategory && activeSubSlug ? `${activeCategory}/${activeSubSlug}` : null;
 
+  // DB 驱动 —— scanner 从 resources/knowledge/ 实际目录 + _index.md 派生
+  const categories = useLibraryStore((s) => s.categories);
   const articlesByPath = useLibraryStore((s) => s.articlesByPath);
   const loadArticles = useLibraryStore((s) => s.loadArticles);
+  // 启动时第一次扫描仍在跑（status='scanning'），但侧栏已经用缓存分类渲染出来 —— 这时给个低调指示。
+  // 首次启动 DB 空时不显示 —— 侧栏本就空，加 badge 反显突兀。
+  const status = useLibraryStore((s) => s.status);
+  const showSyncBadge = status === 'scanning' && categories.length > 0;
 
   /**
-   * 不变量：顶层 category path 不含 `/`，subcategory path 必含 `/`。
-   * 若未来引入三层分类，需要拆分为两个 Set。
+   * 顶层分类 = parentPath 为 null 的（src-tauri/src/scanner.rs 里也是这样写的）。
+   * 子分类按 parentPath 索引，避免每个顶层循环里再 O(n) 查找。
    */
+  const { topCategories, childrenByParent } = useMemo(() => {
+    const tops: Category[] = [];
+    const byParent = new Map<string, Category[]>();
+    for (const c of categories) {
+      if (c.parentPath === null) tops.push(c);
+      else {
+        const arr = byParent.get(c.parentPath) ?? [];
+        arr.push(c);
+        byParent.set(c.parentPath, arr);
+      }
+    }
+    return { topCategories: tops, childrenByParent: byParent };
+  }, [categories]);
+
   const [expanded, setExpanded] = useState<Set<string>>(() => {
     const initial = new Set<string>();
     if (activeCategory) initial.add(activeCategory);
@@ -105,15 +120,26 @@ export default function Sidebar() {
       <div className="flex h-14 items-center px-4 border-b border-border">
         <span className="text-base font-semibold tracking-tight">AI Stack</span>
       </div>
+      {showSyncBadge && (
+        <div
+          className="flex items-center gap-1.5 border-b border-border px-4 py-1.5 text-xs text-text-muted"
+          aria-live="polite"
+        >
+          <RefreshCw size={11} className="animate-spin" />
+          <span>正在同步索引…</span>
+        </div>
+      )}
       <nav className="flex-1 overflow-y-auto p-2">
         <ul className="space-y-0.5">
-          {CATEGORIES.map((cat) => {
-            const Icon = cat.icon && TOP_ICONS[cat.icon];
+          {topCategories.map((cat) => {
+            const iconName = iconForCategoryPath(cat.path);
+            const Icon = iconName ? TOP_ICON_MAP[iconName] : undefined;
             const isActive = activeCategory === cat.path;
             const isOpen = expanded.has(cat.path);
-            const hasChildren = cat.children.length > 0;
+            const children = childrenByParent.get(cat.path) ?? [];
+            const hasChildren = children.length > 0;
             return (
-              <li key={cat.id}>
+              <li key={cat.path}>
                 <div
                   className={`group flex items-center rounded-md text-sm transition-colors ${
                     isActive
@@ -138,7 +164,7 @@ export default function Sidebar() {
                         e.stopPropagation();
                         toggleExpand(cat.path);
                       }}
-                      className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-2 hover:text-text"
+                      className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-text-muted hover:bg-surface-2 hover:text-text"
                     >
                       {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                     </button>
@@ -146,14 +172,15 @@ export default function Sidebar() {
                 </div>
                 {hasChildren && isOpen && (
                   <ul className="ml-2 mt-0.5 space-y-0.5 border-l border-border pl-2">
-                    {cat.children.map((sub) => {
-                      const subSlug = categoryPathToSubSlug(cat.path, sub.path);
+                    {children.map((sub) => {
+                      // sub.path 形如 "02-deep-learning/transformers"，路由里只取尾段
+                      const subSlug = sub.path.slice(cat.path.length + 1);
                       const isSubOpen = expanded.has(sub.path);
                       const isSubActive =
                         activeCategory === cat.path && activeSubSlug === subSlug;
                       const subArticles = articlesByPath[sub.path];
                       return (
-                        <li key={sub.id}>
+                        <li key={sub.path}>
                           <div className="group flex items-center rounded-md text-sm">
                             <NavLink
                               to={`/library/${cat.path}/${subSlug}`}
@@ -172,7 +199,7 @@ export default function Sidebar() {
                               aria-label={isSubOpen ? '折叠文章列表' : '展开文章列表'}
                               aria-expanded={isSubOpen}
                               onClick={() => toggleExpand(sub.path)}
-                              className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded text-text-muted hover:bg-surface-2 hover:text-text"
+                              className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-text-muted hover:bg-surface-2 hover:text-text"
                             >
                               {isSubOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                             </button>

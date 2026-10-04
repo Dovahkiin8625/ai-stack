@@ -33,8 +33,6 @@ reqwest = { version = "0.12", default-features = false, features = ["json", "rus
 # Phase 2 新增
 rusqlite = { version = "0.32", features = ["bundled"] }
 walkdir = "2"
-sha2 = "0.10"
-hex = "0.4"
 chrono = { version = "0.4", features = ["serde"] }
 comrak = { version = "0.22", default-features = false, features = ["shortcodes"] }
 # PDF 渲染由前端 pdf.js 承担；后端只用 pdf-extract 数页（纯 Rust，无 native 依赖）
@@ -45,3 +43,4 @@ quick-xml = { version = "0.36", features = ["serialize"] }
 
 [dev-dependencies]
 tempfile = "3"
+filetime = "0.2"

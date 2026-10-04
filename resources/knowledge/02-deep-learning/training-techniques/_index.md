@@ -19,14 +19,8 @@
 
 - [混合精度与分布式训练](./mixed-precision-and-distributed.md) — FP16/BF16 精度对比、`autocast` + `GradScaler`、AdamW 显存拆解、DP/DDP/FSDP/ZeRO-1/2/3/张量并行/流水线并行、梯度检查点、`torchrun` 启动模板。
 
-## 收录范围
+## 三方资料
 
-- 教材与讲义（Markdown / PDF）
-- 论文（PDF）
-- 讲稿与笔记（Markdown / Word / PPTX）
-
-## 命名约定
-
-- 每个子主题一个文件夹，文件夹命名用 kebab-case。
-- 每个文件夹下放一个 `_index.md` 作为目录索引（阶段 2 由索引生成器读取）。
-- 文件名建议：`YYYY-MM-DD-<title>.md` 或原文件名。
+- [Adam 优化器论文](./三方资料/adam.pdf) — Kingma & Ba 2014 自适应矩估计优化器。
+- [AdamW 论文](./三方资料/adamw.pdf) — Loshchilov & Hutter 2019 解耦权重衰减的 Adam。
+- [混合精度训练论文](./三方资料/mixed-precision.pdf) — Micikevicius et al. 2017 半精度训练加速深度学习。

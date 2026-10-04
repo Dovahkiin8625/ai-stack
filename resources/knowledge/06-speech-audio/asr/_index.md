@@ -12,14 +12,7 @@
 - [Whisper与多任务统一ASR](./asr-whisper-llm.md)
 - [ASR评估、解码与部署优化](./asr-evaluation.md)
 
-## 收录范围
+## 三方资料
 
-- 教材与讲义（Markdown / PDF）
-- 论文（PDF）
-- 讲稿与笔记（Markdown / Word / PPTX）
-
-## 命名约定
-
-- 每个子主题一个文件夹，文件夹命名用 kebab-case。
-- 每个文件夹下放一个 `_index.md` 作为目录索引（阶段 2 由索引生成器读取）。
-- 文件名建议：`YYYY-MM-DD-<title>.md` 或原文件名。
+- [wav2vec 2.0 论文](./三方资料/wav2vec2.pdf) — Baevski et al. 2020 自监督语音表示。
+- [Whisper 论文](./三方资料/whisper.pdf) — Radford et al. 2022 鲁棒语音识别大模型。

@@ -5,19 +5,11 @@
 
 本目录用于存放与「Image Classification」相关的学习资料。
 
-## 收录范围
-
-- 教材与讲义（Markdown / PDF）
-- 论文（PDF）
-- 讲稿与笔记（Markdown / Word / PPTX）
-
 ## 文章列表
 
 - [CNN 演进之路：从 LeNet 到 ResNet 的架构与思想](./cnn-resnet.md)
 - [Vision Transformer 与现代视觉架构：从 ViT 到 ConvNeXt](./vision-transformer.md)
 
-## 命名约定
+## 三方资料
 
-- 每个子主题一个文件夹，文件夹命名用 kebab-case。
-- 每个文件夹下放一个 `_index.md` 作为目录索引（阶段 2 由索引生成器读取）。
-- 文件名建议：`YYYY-MM-DD-<title>.md` 或原文件名。
+- [ViT 论文](./三方资料/vit.pdf) — Dosovitskiy et al. 2021 视觉 Transformer。

@@ -14,18 +14,7 @@
 | [industry-reports/](./industry-reports/) | 行业报告 | Stanford AI Index、McKinsey State of AI、Gartner Hype Cycle 等权威报告 |
 | [news-updates/](./news-updates/) | 新闻动态 | 模型发布、融资事件、监管政策、开源生态等近期新闻 |
 
-## 收录范围
 
-- 顶会综述与重要论文解读（Markdown）
-- 行业报告核心数据与分析（Markdown / PDF）
-- 重要新闻事件追踪（Markdown）
-- 技术趋势季度总结（Markdown）
-
-## 命名约定
-
-- 每个子主题对应一个 kebab-case 文件夹。
-- 每篇文章一个 `.md` 文件，命名采用 kebab-case。
-- 时间敏感的内容在文件名中标注年份或季度。
 
 ## 阅读建议
 

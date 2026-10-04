@@ -7,6 +7,7 @@ import type {
   Resource,
   ResourceContent,
   ScanSummary,
+  SubcategoryIndex,
 } from '../types';
 
 export async function scanLibrary(force = false): Promise<ScanSummary> {
@@ -23,6 +24,16 @@ export async function listResources(categoryPath: string): Promise<Resource[]> {
 
 export async function readResource(id: number): Promise<ResourceContent> {
   return invoke<ResourceContent>('read_resource', { id });
+}
+
+/**
+ * 读取并解析子分类目录下的 `_index.md`，得到结构化的条目列表
+ * （含每篇文章的简介）。编辑 `_index.md` 后无需重启，调用一次即可。
+ */
+export async function readSubcategoryIndex(
+  categoryPath: string,
+): Promise<SubcategoryIndex> {
+  return invoke<SubcategoryIndex>('read_subcategory_index', { categoryPath });
 }
 
 /**
