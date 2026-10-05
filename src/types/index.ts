@@ -119,6 +119,13 @@ export interface Note {
   content: string;
   anchorText: string | null;
   anchorOccurrence: number;
+  /**
+   * 用户问 AI 的问题原文（仅"询问 AI"流程会写入）。
+   * - AI 讲解场景永远为 null
+   * - 笔记卡片只在 prompt 非空时渲染"❓ 提问"引用块，方便回看时知道当时问的是什么
+   * - 用户编辑笔记时不影响 prompt（保留原始问题作为上下文）
+   */
+  prompt?: string | null;
   /** 笔记来源：'user' 人工添加 / 'ai' 大模型讲解 */
   source: NoteSource;
   createdAt: string;

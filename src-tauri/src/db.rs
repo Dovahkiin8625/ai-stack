@@ -49,6 +49,9 @@ pub struct NoteRow {
     pub content: String,
     pub anchor_text: Option<String>,
     pub anchor_occurrence: i64,
+    /// 用户在 AI 问答流前输入的问题。AI 讲解场景永远为 None；笔记卡片只在 prompt 非空时
+    /// 渲染"❓ 提问"块，让回看时知道这条答案是回答什么问题的。
+    pub prompt: Option<String>,
     pub source: String,
     pub created_at: String,
     pub updated_at: String,
@@ -137,6 +140,18 @@ impl Db {
                 "ALTER TABLE notes ADD COLUMN source TEXT NOT NULL DEFAULT 'user'",
                 [],
             )?;
+        }
+        // Phase 5 增量：notes 表新增 prompt 列（用户问 AI 的问题）。
+        // 旧笔记 prompt 全为 NULL（向后兼容）；新增 prompt 列用于新增 prompt。
+        let has_prompt: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='prompt'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_prompt == 0 {
+            tx.execute("ALTER TABLE notes ADD COLUMN prompt TEXT", [])?;
         }
         let now = chrono::Utc::now().to_rfc3339();
         tx.execute(
@@ -292,7 +307,7 @@ impl Db {
     pub fn list_notes(&self, resource_id: i64) -> Result<Vec<NoteRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, resource_id, content, anchor_text, anchor_occurrence,
-                    source, created_at, updated_at
+                    prompt, source, created_at, updated_at
              FROM notes WHERE resource_id = ?1
              ORDER BY id",
         )?;
@@ -304,9 +319,10 @@ impl Db {
                     content: row.get(2)?,
                     anchor_text: row.get(3)?,
                     anchor_occurrence: row.get(4)?,
-                    source: row.get(5)?,
-                    created_at: row.get(6)?,
-                    updated_at: row.get(7)?,
+                    prompt: row.get(5)?,
+                    source: row.get(6)?,
+                    created_at: row.get(7)?,
+                    updated_at: row.get(8)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -320,13 +336,24 @@ impl Db {
         anchor_text: Option<&str>,
         anchor_occurrence: i64,
         source: &str,
+        // 仅"用户问 AI" 场景使用（AI 讲解场景传 None）。
+        // 存进 DB 后由 list_notes / get_note 回读，笔记卡片不再用。
+        prompt: Option<&str>,
     ) -> Result<NoteRow> {
         let now = chrono::Utc::now().to_rfc3339();
         self.conn.execute(
             "INSERT INTO notes (resource_id, content, anchor_text, anchor_occurrence,
-                                source, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?6)",
-            params![resource_id, content, anchor_text, anchor_occurrence, source, now],
+                                source, prompt, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+            params![
+                resource_id,
+                content,
+                anchor_text,
+                anchor_occurrence,
+                source,
+                prompt,
+                now
+            ],
         )?;
         let id = self.conn.last_insert_rowid();
         self.get_note(id)
@@ -377,7 +404,7 @@ impl Db {
             .conn
             .query_row(
                 "SELECT id, resource_id, content, anchor_text, anchor_occurrence,
-                        source, created_at, updated_at
+                        prompt, source, created_at, updated_at
                  FROM notes WHERE id = ?1",
                 [id],
                 |r| {
@@ -387,9 +414,10 @@ impl Db {
                         content: r.get(2)?,
                         anchor_text: r.get(3)?,
                         anchor_occurrence: r.get(4)?,
-                        source: r.get(5)?,
-                        created_at: r.get(6)?,
-                        updated_at: r.get(7)?,
+                        prompt: r.get(5)?,
+                        source: r.get(6)?,
+                        created_at: r.get(7)?,
+                        updated_at: r.get(8)?,
                     })
                 },
             )

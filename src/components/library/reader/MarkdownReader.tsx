@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { Check, Copy, Loader2, Languages, MessageSquarePlus, Sparkles } from 'lucide-react';
+import { Check, Copy, Loader2, Languages, MessageSquarePlus, Sparkles, HelpCircle } from 'lucide-react';
 import katex from 'katex';
 import renderMathInElement from 'katex/contrib/auto-render';
 import hljs from 'highlight.js/lib/core';
@@ -15,6 +15,7 @@ import css from 'highlight.js/lib/languages/css';
 import { translateText as apiTranslateText } from '../../../lib/library-api';
 import { getSettings } from '../../../lib/tauri';
 import type { Note } from '../../../types';
+import AskInputBox from './AskInputBox';
 
 export interface MarkdownReaderHandle {
   scrollToAnchor: (noteId: number) => void;
@@ -37,6 +38,18 @@ interface Props {
     sectionTitle: string;
     anchorText: string;
     anchorOccurrence: number;
+  }) => Promise<void>;
+  /** 右键菜单"询问 AI"：把选区上下文 + 用户问题交给父组件，父组件去调 LLM 然后建笔记
+   * （source='ai'，prompt=用户问题）。与 onAiAnnotate 平行：两者走同一个笔记抽屉/流式机制，
+   * 但 prompt 是否为空决定了笔记卡片是否渲染"❓ 提问"引用块。 */
+  onAiAsk?: (input: {
+    selectedText: string;
+    contextBefore: string;
+    contextAfter: string;
+    sectionTitle: string;
+    anchorText: string;
+    anchorOccurrence: number;
+    question: string;
   }) => Promise<void>;
 }
 
@@ -382,7 +395,7 @@ function extractAiContext(
 }
 
 export default forwardRef<MarkdownReaderHandle, Props>(function MarkdownReader(
-  { html, notes = [], onMarkClick, onAddNoteAtSelection, onAiAnnotate },
+  { html, notes = [], onMarkClick, onAddNoteAtSelection, onAiAnnotate, onAiAsk },
   ref,
 ) {
   const innerRef = useRef<HTMLDivElement>(null);
@@ -399,6 +412,27 @@ export default forwardRef<MarkdownReaderHandle, Props>(function MarkdownReader(
   } | null>(null);
   /** 复制成功后的瞬时反馈：true 时菜单只显示一行"已复制"，800ms 后自动关闭 */
   const [copied, setCopied] = useState(false);
+
+  /** "询问 AI" 浮层输入框的位置。null 表示未打开。
+   *  - 打开流程：右键菜单 → 点"询问 AI" → 关闭菜单 → 在原菜单位置显示 AskInputBox
+   *  - 关闭流程：提交后（onSubmit）/ 取消按钮 / Esc / 外部点击
+   *  与 menu 互斥：menu 关闭后才能开 askBox，反之亦然。
+   *  同时缓存 anchor 上下文（选中文本 + 章节 + 前后窗 + anchor 信息），
+   *  提交时直接复用，不再依赖 window.getSelection() —— 浮层聚焦到输入框后
+   *  原选区可能已被浏览器清掉，重新取会拿到空。 */
+  const [askBox, setAskBox] = useState<
+    | {
+        x: number;
+        y: number;
+        selectedText: string;
+        contextBefore: string;
+        contextAfter: string;
+        sectionTitle: string;
+        anchorText: string;
+        anchorOccurrence: number;
+      }
+    | null
+  >(null);
 
   /**
    * 选区菜单上的"翻译"流程：idle → loading → success/error。
@@ -644,6 +678,78 @@ export default forwardRef<MarkdownReaderHandle, Props>(function MarkdownReader(
     }).catch((e) => console.error('AI explain failed', e));
   };
 
+  // 右键菜单的"询问 AI"：关菜单 → 弹出 mini 输入框 → 用户输入问题 → 提交。
+  // 在打开瞬间把选区上下文全部缓存进 askBox —— 浮层聚焦后浏览器会清掉原 selection，
+  // 提交时再取就拿不到了，所以一次性把 selection 衍生信息全存好。
+  const handleAiAskOpen = () => {
+    if (!menu || !onAiAsk) return;
+    const sel = window.getSelection();
+    if (!sel || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    const el = innerRef.current;
+    if (!el || !el.contains(range.commonAncestorContainer)) return;
+    const selectedText = sel.toString().trim();
+    if (!selectedText) return;
+
+    const ctx = extractAiContext(el, range);
+    setMenu(null);
+    setTranslation({ status: 'idle' });
+    setAskBox({
+      x: menu.x,
+      y: menu.y,
+      selectedText,
+      contextBefore: ctx.contextBefore,
+      contextAfter: ctx.contextAfter,
+      sectionTitle: ctx.sectionTitle,
+      anchorText: menu.anchorText,
+      anchorOccurrence: menu.anchorOccurrence,
+    });
+  };
+
+  // 用户提交问题：把缓存的选区上下文 + 问题一起交给父组件去调 LLM 建笔记。
+  const handleAiAskSubmit = (question: string) => {
+    if (!onAiAsk || !askBox) return;
+    setAskBox(null);
+    void onAiAsk({
+      selectedText: askBox.selectedText,
+      contextBefore: askBox.contextBefore,
+      contextAfter: askBox.contextAfter,
+      sectionTitle: askBox.sectionTitle,
+      anchorText: askBox.anchorText,
+      anchorOccurrence: askBox.anchorOccurrence,
+      question,
+    }).catch((e) => console.error('AI ask failed', e));
+  };
+
+  const handleAiAskCancel = () => {
+    setAskBox(null);
+  };
+
+  // 浮层打开时挂全局监听：点击 AskInputBox 外部 / Esc 关闭浮层。
+  // AskInputBox 自身接管 mousedown（stopPropagation），所以这里只关心"外部点击"。
+  useEffect(() => {
+    if (!askBox) return;
+    const close = () => setAskBox(null);
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-ask-input-box]')) return;
+      close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    // setTimeout 0 跳过触发本次打开的 mousedown，避免"刚开就被关"
+    const id = window.setTimeout(() => {
+      document.addEventListener('mousedown', onMouseDown);
+      document.addEventListener('keydown', onKey);
+    }, 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [askBox]);
+
   return (
     <div className="relative h-full overflow-auto">
       <div
@@ -767,12 +873,29 @@ export default forwardRef<MarkdownReaderHandle, Props>(function MarkdownReader(
                       </button>
                     </>
                   )}
+                  {onAiAsk && (
+                    <button
+                      type="button"
+                      onClick={() => handleAiAskOpen()}
+                      className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-sm text-text hover:bg-surface-2"
+                    >
+                      <HelpCircle size={14} className="text-text-muted" />
+                      询问 AI
+                    </button>
+                  )}
                 </>
               )}
             </>
           )}
         </div>
       )}
-    </div>
+    {askBox && (
+        <AskInputBox
+          position={{ x: askBox.x, y: askBox.y }}
+          onSubmit={handleAiAskSubmit}
+          onCancel={handleAiAskCancel}
+        />
+      )}
+      </div>
   );
 });

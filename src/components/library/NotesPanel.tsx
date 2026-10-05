@@ -1,5 +1,5 @@
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from 'react';
-import { MessageSquarePlus, Pencil, Trash2, X, Check, StickyNote, Sparkles } from 'lucide-react';
+import { MessageSquarePlus, Pencil, Trash2, X, Check, StickyNote, Sparkles, HelpCircle } from 'lucide-react';
 import type { Note } from '../../types';
 import { useNotesStore } from '../../stores/notes';
 
@@ -156,6 +156,20 @@ const NotesPanel = forwardRef<NotesPanelHandle, Props>(function NotesPanel({ onA
                       >
                         “{n.anchorText}”
                       </button>
+                    )}
+                    {/* "询问 AI" 流程有用户问题 prompt；AI 讲解流程没有，prompt 为 null/undefined/空串。
+                       只在 prompt 真的有内容时渲染"❓ 提问"引用块 —— 让回看时知道这条答案是回答什么问题的。 */}
+                    {n.prompt && n.prompt.trim().length > 0 && (
+                      <div
+                        className="mb-1 rounded border-l-2 border-blue-300 bg-blue-50 px-2 py-1 text-xs text-blue-900 dark:border-blue-700 dark:bg-blue-900/30 dark:text-blue-100"
+                        title="用户当时向 AI 提的问题"
+                      >
+                        <div className="mb-0.5 flex items-center gap-1 font-medium opacity-80">
+                          <HelpCircle size={11} />
+                          提问
+                        </div>
+                        <div className="whitespace-pre-wrap break-words">{n.prompt}</div>
+                      </div>
                     )}
                     {editingId === n.id ? (
                       <textarea

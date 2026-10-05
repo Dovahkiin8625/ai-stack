@@ -38,6 +38,7 @@ pub fn run() {
             commands::delete_note,
             commands::translate_text,
             commands::start_ai_annotate,
+            commands::start_ai_qa,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ai-stack application");

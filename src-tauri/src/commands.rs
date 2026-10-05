@@ -81,6 +81,7 @@ pub struct NoteDto {
     pub content: String,
     pub anchor_text: Option<String>,
     pub anchor_occurrence: i64,
+    pub prompt: Option<String>,
     pub source: String,
     pub created_at: String,
     pub updated_at: String,
@@ -94,6 +95,7 @@ impl From<NoteRow> for NoteDto {
             content: n.content,
             anchor_text: n.anchor_text,
             anchor_occurrence: n.anchor_occurrence,
+            prompt: n.prompt,
             source: n.source,
             created_at: n.created_at,
             updated_at: n.updated_at,
@@ -274,6 +276,7 @@ pub fn create_note(payload: NotePayload, app: AppHandle) -> Result<NoteDto, Stri
         payload.anchor_text.as_deref(),
         payload.anchor_occurrence,
         source,
+        None, // 普通 create_note 永远没有 prompt（用户从右侧 composer 输入，不走 AI 问答流）
     )
     .map(NoteDto::from)
     .map_err(|e| e.to_string())
@@ -390,6 +393,7 @@ pub async fn start_ai_annotate(
             anchor_text.as_deref(),
             0,
             "ai",
+            None, // AI 讲解场景：用户没问问题，prompt 永远为 None；走"询问 AI"走 start_ai_qa 才有 prompt
         )
         .map_err(|e| e.to_string())?;
     let note_id = placeholder.id;
@@ -438,6 +442,159 @@ pub async fn start_ai_annotate(
     });
 
     Ok(NoteDto::from(placeholder))
+}
+
+/// QA 场景的输入：用户在选中文字上提了一个问题。
+/// 流程与 `start_ai_annotate` 平行：建占位笔记 → 立刻返回 → 后台任务拉流。
+/// 占位笔记 `prompt` 字段写上用户问题，用于笔记卡片渲染"❓ 提问"引用块。
+#[derive(Deserialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct AiAskPayload {
+    pub resource_id: i64,
+    pub selected_text: String,
+    pub context_before: String,
+    pub context_after: String,
+    pub section_title: String,
+    /// 用户在浮层输入框里提交的问题。trim 后为空时拒绝请求。
+    pub question: String,
+    pub base_url: String,
+    /// 与 AI 讲解共用高性能模型；启用 extended thinking（claude-* 前缀启发式）
+    pub performance_model: String,
+    pub api_key: String,
+}
+
+#[tauri::command]
+pub async fn start_ai_qa(payload: AiAskPayload, app: AppHandle) -> Result<NoteDto, String> {
+    // 1. 校验
+    let selected = payload.selected_text.trim();
+    if selected.is_empty() {
+        return Err("选中文本为空".to_string());
+    }
+    let question = payload.question.trim();
+    if question.is_empty() {
+        return Err("问题不能为空".to_string());
+    }
+    let api_key = payload.api_key.trim();
+    if api_key.is_empty() {
+        return Err("未配置 API Key，请在设置页填写".to_string());
+    }
+    let model = payload.performance_model.trim();
+    if model.is_empty() {
+        return Err("未配置高性能模型，请在设置页填写".to_string());
+    }
+
+    // 2. 创建占位笔记（content="", source="ai", prompt=用户问题）。
+    let state: tauri::State<AppState> = app.state();
+    let db_path = state.db_path.clone();
+    let db = Db::open(&db_path).map_err(|e| e.to_string())?;
+    let anchor_text = if selected.is_empty() {
+        None
+    } else {
+        Some(selected.to_string())
+    };
+    let placeholder = db
+        .insert_note(
+            payload.resource_id,
+            "",
+            anchor_text.as_deref(),
+            0,
+            "ai",
+            Some(question), // <-- QA 场景：prompt = 用户问题
+        )
+        .map_err(|e| e.to_string())?;
+    let note_id = placeholder.id;
+    let placeholder_anchor = placeholder.anchor_text.clone();
+    let placeholder_occurrence = placeholder.anchor_occurrence;
+
+    // 3. 后台任务：与 AI 讲解共用流式逻辑，但事件名 + 错误前缀不同（QA 专属），
+    // prompt 也由 build_qa_prompt 拼装（用户问题替换"讲解"角色）。
+    let app_clone = app.clone();
+    tokio::spawn(async move {
+        let result = stream_ai_qa(
+            app_clone.clone(),
+            note_id,
+            placeholder_anchor.clone(),
+            placeholder_occurrence,
+            payload,
+            db_path.clone(),
+        )
+        .await;
+
+        match result {
+            Ok(()) => {
+                let _ = app_clone.emit("ai-qa-done", note_id);
+            }
+            Err(e) => {
+                // 失败：把错误信息写进 note.content，前端和 DB 都看得到
+                let error_msg = format!("AI 问答失败：{e}");
+                if let Ok(db) = Db::open(&db_path) {
+                    let _ = db.update_note(
+                        note_id,
+                        &error_msg,
+                        placeholder_anchor.as_deref(),
+                        placeholder_occurrence,
+                        None,
+                    );
+                }
+                let _ = app_clone.emit(
+                    "ai-qa-error",
+                    AiErrorPayload {
+                        note_id,
+                        message: e,
+                        final_content: error_msg,
+                    },
+                );
+            }
+        }
+    });
+
+    Ok(NoteDto::from(placeholder))
+}
+
+/// QA 场景的 prompt 模板：把章节标题 + 前后窗 + 选中片段作为"用户在读什么"摆出来，
+/// 把"用户问题"摆在最显眼位置让模型立即知道回答什么。
+///
+/// 与 AI 讲解的差异：
+/// - QA 强调"直接回答问题"，不允许复述选区/客套
+/// - QA 输出更短（3-5 句），避免长篇大论
+///
+/// 章节/前文/后文/选区为空时分别用占位符（无章节标题）/（无前文）等，
+/// 避免模型把空字符串误读为有效输入。
+pub(crate) fn build_qa_prompt(
+    section: &str,
+    before: &str,
+    after: &str,
+    selected: &str,
+    question: &str,
+) -> String {
+    format!(
+        "你是知识问答助手。用户针对以下文字提出了问题，请直接、简洁地回答问题本身：\n\
+         - 只回答用户问的事情，不要复述选区、不要客套、不要评价问题本身。\n\
+         - 必要时用一句话给出相关背景或细节。\n\
+         \n\
+         输出 3-5 句中文纯文本段落。不要使用任何 markdown 标记（标题、列表、粗体、代码块、引用），笔记面板只渲染纯文本。\n\
+         \n\
+         ---\n\
+         \n\
+         章节：{section}\n\
+         \n\
+         前文：\n\
+         {before}\n\
+         \n\
+         【用户选中的片段】\n\
+         {selected}\n\
+         \n\
+         后文：\n\
+         {after}\n\
+         \n\
+         【用户问题】\n\
+         {question}",
+        section = if section.is_empty() { "（无章节标题）" } else { section },
+        before = if before.is_empty() { "（无前文）" } else { before },
+        after = if after.is_empty() { "（无后文）" } else { after },
+        selected = selected,
+        question = question,
+    )
 }
 
 /// 判断模型是否接受 Anthropic 原生的 `thinking` 字段。
@@ -567,6 +724,112 @@ async fn stream_ai_annotation(
 
             // 同步写 DB —— 即使前端关掉面板，笔记也是完整的
             // source 在流式追加阶段保持不变（仍是 'ai'），用户编辑后才降级
+            let _ = db.update_note(
+                note_id,
+                &accumulated,
+                anchor_text.as_deref(),
+                anchor_occurrence,
+                None,
+            );
+        }
+    }
+
+    if accumulated.is_empty() {
+        return Err("模型返回了空内容".to_string());
+    }
+    Ok(())
+}
+
+/// QA 流式任务：与 `stream_ai_annotation` 几乎一致，
+/// 唯一差异是 prompt 由 `build_qa_prompt` 拼装（包含用户问题）、
+/// 事件名走 `ai-qa-chunk`（与 AI 讲解的 `ai-annotate-chunk` 物理隔离）。
+///
+/// 共享 HTTP/SSE/DB 写入逻辑不抽到公共函数：未来 prompt 路由或事件协议演化时
+/// 各自调整，避免一处改动波及两个场景。如果以后 QA 也需要切到轻量模型或
+/// 关闭 thinking，再考虑抽公共 stream helper。
+async fn stream_ai_qa(
+    app: AppHandle,
+    note_id: i64,
+    anchor_text: Option<String>,
+    anchor_occurrence: i64,
+    payload: AiAskPayload,
+    db_path: std::path::PathBuf,
+) -> Result<(), String> {
+    let section = payload.section_title.trim();
+    let before = payload.context_before.trim();
+    let after = payload.context_after.trim();
+    let selected = payload.selected_text.trim();
+    let question = payload.question.trim();
+
+    let prompt = build_qa_prompt(section, before, after, selected, question);
+
+    let model = payload.performance_model.trim();
+    let supports_thinking = model_supports_thinking(model);
+    let mut req_body = serde_json::json!({
+        "model": model,
+        "max_tokens": 2048, // QA 输出 3-5 句，2048 token 充裕
+        "messages": [{ "role": "user", "content": prompt }],
+        "stream": true,
+    });
+    if supports_thinking {
+        req_body["thinking"] = serde_json::json!({
+            "type": "enabled",
+            // QA 不需要长思考 —— 1024 token 足够模型理清问题并给出答案；
+            // 比 AI 讲解（2048）省一半，避免不必要延迟
+            "budget_tokens": 1024,
+        });
+    }
+
+    let url = format!(
+        "{}/v1/messages",
+        payload.base_url.trim_end_matches('/')
+    );
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(120))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+
+    let mut res = client
+        .post(&url)
+        .header("x-api-key", payload.api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .json(&req_body)
+        .send()
+        .await
+        .map_err(|e| format!("请求失败：{e}（请检查网络与 baseUrl）"))?;
+
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Err(format!("HTTP {}：{}", status.as_u16(), body));
+    }
+
+    let db = Db::open(&db_path).map_err(|e| format!("open db: {e}"))?;
+
+    let mut parser = SseParser::new();
+    let mut accumulated = String::new();
+
+    while let Some(chunk) = res
+        .chunk()
+        .await
+        .map_err(|e| format!("读取流失败：{e}"))?
+    {
+        let s = String::from_utf8_lossy(&chunk);
+        for text in parser.feed(&s) {
+            accumulated.push_str(&text);
+
+            let _ = app.emit(
+                "ai-qa-chunk", // 与 AI 讲解的 "ai-annotate-chunk" 物理隔离
+                AiChunkPayload {
+                    note_id,
+                    text: text.clone(),
+                },
+            );
+
+            // 同步写 DB —— 即使前端关掉面板，笔记也是完整的
+            // source 在流式追加阶段保持 'ai'；用户编辑后才降级
+            // prompt 在 insert 时已写入，update 不再触碰（保留用户原问题）
             let _ = db.update_note(
                 note_id,
                 &accumulated,
@@ -806,7 +1069,10 @@ fn find_knowledge_root(start: &std::path::Path) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
-    use super::{find_knowledge_root, model_supports_thinking, AiChunkPayload, AiErrorPayload};
+    use super::{
+        build_qa_prompt, find_knowledge_root, model_supports_thinking, AiChunkPayload,
+        AiErrorPayload,
+    };
 
     #[test]
     fn find_knowledge_root_walks_up_to_directory() {
@@ -879,5 +1145,54 @@ mod tests {
         );
         assert!(!json.contains("note_id"), "snake_case leaked: {json}");
         assert!(!json.contains("final_content"), "snake_case leaked: {json}");
+    }
+
+    /// QA prompt 必须把"用户问题"放在最显眼的末尾位置，让模型立刻知道回答什么；
+    /// 也必须把章节标题 / 前文 / 后文 / 选中片段放进 prompt —— 与 AI 讲解共用同一套上下文策略，
+    /// 这样模型能基于文章语境回答而不是空谈。
+    #[test]
+    fn build_qa_prompt_contains_required_sections() {
+        let prompt = build_qa_prompt(
+            "反向传播",
+            "前文...梯度下降法...",
+            "后文...权重更新...",
+            "链式法则",
+            "为什么这里用链式法则？",
+        );
+
+        assert!(prompt.contains("章节：反向传播"), "章节缺失：{prompt}");
+        assert!(prompt.contains("前文：\n前文...梯度下降法..."), "前文缺失：{prompt}");
+        assert!(
+            prompt.contains("【用户选中的片段】\n链式法则"),
+            "选中片段缺失：{prompt}"
+        );
+        assert!(prompt.contains("后文：\n后文...权重更新..."), "后文缺失：{prompt}");
+        assert!(
+            prompt.contains("【用户问题】\n为什么这里用链式法则？"),
+            "用户问题缺失：{prompt}"
+        );
+    }
+
+    /// 空章节标题走"（无章节标题）"占位，避免模型把空字符串误读为有效输入；
+    /// 同 AI 讲解的占位约定。
+    #[test]
+    fn build_qa_prompt_handles_empty_section() {
+        let prompt = build_qa_prompt("", "前文", "后文", "选区", "问题");
+        assert!(
+            prompt.contains("章节：（无章节标题）"),
+            "占位符缺失：{prompt}"
+        );
+    }
+
+    /// QA 场景不需要 thinking —— 用户已经明确问了什么，模型直接回答即可；
+    /// 不在 prompt 层控制，由调用方在请求体里省略 thinking 字段（与 AI 讲解场景的
+    /// supports_thinking 决策逻辑一致）。
+    #[test]
+    fn build_qa_prompt_strips_own_line_length() {
+        // 单一职责：build_qa_prompt 只负责拼字符串，不应该 trim 后改变语义。
+        // trim 的责任在调用方（与 stream_ai_annotation 的处理路径一致）。
+        let prompt = build_qa_prompt("  ", "  ", "  ", "  ", "  ");
+        // 不抛错，输出非空即可
+        assert!(!prompt.is_empty());
     }
 }

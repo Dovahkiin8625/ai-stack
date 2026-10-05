@@ -118,3 +118,32 @@ export interface AiAnnotateInput {
 export async function startAiAnnotate(input: AiAnnotateInput): Promise<Note> {
   return invoke<Note>('start_ai_annotate', { payload: input });
 }
+
+export interface AiAskInput {
+  resourceId: number;
+  selectedText: string;
+  contextBefore: string;
+  contextAfter: string;
+  sectionTitle: string;
+  /** 用户在浮层输入框里提交的问题。后端会 trim 后非空校验，存进 DB 的 note.prompt。 */
+  question: string;
+  baseUrl: string;
+  performanceModel: string;
+  apiKey: string;
+}
+
+/**
+ * 流式 AI 问答（选中询问）：
+ * - 用户在右键菜单选「询问 AI」→ 浮层输入问题 → 提交
+ * - 后端立即返回占位笔记（content=""，source="ai"，prompt=用户问题），前端放进笔记列表、打开抽屉
+ * - 后端在 tokio 后台任务里拉 Anthropic SSE，逐 chunk emit "ai-qa-chunk" 事件
+ * - 全部结束 emit "ai-qa-done"；失败 emit "ai-qa-error" 并把错误文本写进 note.content
+ *
+ * 与 startAiAnnotate 的差异：
+ * - 事件名走 ai-qa-*（与 ai-annotate-* 物理隔离，避免 listener 串扰）
+ * - 多携带 `question` 字段作为 prompt
+ * - 后端 prompt 模板不同（"直接回答问题" 而非"讲解"）
+ */
+export async function startAiAsk(input: AiAskInput): Promise<Note> {
+  return invoke<Note>('start_ai_qa', { payload: input });
+}
