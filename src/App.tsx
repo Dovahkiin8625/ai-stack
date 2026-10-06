@@ -1,10 +1,8 @@
 import { useEffect, useMemo } from 'react';
 import { HashRouter, Routes, Route, Navigate } from 'react-router-dom';
-import { listen } from '@tauri-apps/api/event';
 import Layout from './components/layout/Layout';
 import CategoryPage from './routes/CategoryPage';
 import Settings from './routes/Settings';
-import { useThemeStore } from './stores/theme';
 import { useLibraryStore } from './stores/library';
 
 /**
@@ -23,7 +21,6 @@ function useDefaultCategoryPath(): string {
 }
 
 export default function App() {
-  const toggle = useThemeStore((s) => s.toggle);
   const scan = useLibraryStore((s) => s.scan);
   const loadCachedCategories = useLibraryStore((s) => s.loadCachedCategories);
   const defaultCategoryPath = useDefaultCategoryPath();
@@ -38,16 +35,6 @@ export default function App() {
       await scan(false);
     })();
   }, [scan, loadCachedCategories]);
-
-  useEffect(() => {
-    const unlisten = listen<string>('menu', (e) => {
-      if (e.payload === 'toggle_theme') toggle();
-      // 其他菜单项在后续阶段实现
-    });
-    return () => {
-      unlisten.then((fn) => fn());
-    };
-  }, [toggle]);
 
   return (
     <HashRouter>

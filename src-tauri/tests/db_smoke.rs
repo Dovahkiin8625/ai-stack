@@ -137,11 +137,11 @@ fn update_note_without_source_keeps_existing_source() {
     let mut db = Db::open(&tmp.path().join("t.db")).unwrap();
     db.migrate().unwrap();
     let rid = fixture_with_resource(&mut db);
-    let ai = db.insert_note(rid, "AI 内容", None, 0, "ai", None).unwrap();
+    let ai = db.insert_note(rid, "AI 内容", None, 0, "ai", None, None).unwrap();
     assert_eq!(ai.source, "ai");
 
     // 普通编辑，source 传 None
-    let after = db.update_note(ai.id, "编辑后", None, 0, None).unwrap();
+    let after = db.update_note(ai.id, "编辑后", None, 0, None, None).unwrap();
     assert_eq!(after.source, "ai", "未传 source 时必须保留原值");
     assert_eq!(after.content, "编辑后");
 }
@@ -153,9 +153,9 @@ fn update_note_with_source_can_demote_ai_to_user() {
     let mut db = Db::open(&tmp.path().join("t.db")).unwrap();
     db.migrate().unwrap();
     let rid = fixture_with_resource(&mut db);
-    let ai = db.insert_note(rid, "AI 内容", None, 0, "ai", None).unwrap();
+    let ai = db.insert_note(rid, "AI 内容", None, 0, "ai", None, None).unwrap();
 
-    let after = db.update_note(ai.id, "用户改写", None, 0, Some("user")).unwrap();
+    let after = db.update_note(ai.id, "用户改写", None, 0, Some("user"), None).unwrap();
     assert_eq!(after.source, "user");
     assert_eq!(after.content, "用户改写");
 }
@@ -167,8 +167,8 @@ fn list_notes_reflects_source_after_update() {
     let mut db = Db::open(&tmp.path().join("t.db")).unwrap();
     db.migrate().unwrap();
     let rid = fixture_with_resource(&mut db);
-    let ai = db.insert_note(rid, "AI 内容", None, 0, "ai", None).unwrap();
-    db.update_note(ai.id, "改写", None, 0, Some("user")).unwrap();
+    let ai = db.insert_note(rid, "AI 内容", None, 0, "ai", None, None).unwrap();
+    db.update_note(ai.id, "改写", None, 0, Some("user"), None).unwrap();
     let listed = db.list_notes(rid).unwrap();
     assert_eq!(listed.len(), 1);
     assert_eq!(listed[0].source, "user");
@@ -195,7 +195,7 @@ fn migrate_adds_prompt_column_to_notes() {
     assert_eq!(has, 1, "notes 表必须有 prompt 列");
 
     // 老笔记（未传 prompt）插入后 prompt 为 NULL，向后兼容
-    let n = db.insert_note(rid, "AI 讲解内容", None, 0, "ai", None).unwrap();
+    let n = db.insert_note(rid, "AI 讲解内容", None, 0, "ai", None, None).unwrap();
     assert_eq!(n.prompt, None);
 }
 
@@ -215,6 +215,7 @@ fn insert_note_with_prompt_stores_prompt() {
             0,
             "ai",
             Some("为什么用 sigmoid?"),
+            None,
         )
         .unwrap();
     assert_eq!(n.prompt.as_deref(), Some("为什么用 sigmoid?"));
@@ -242,12 +243,75 @@ fn update_note_preserves_prompt_by_default() {
             0,
             "ai",
             Some("用户原问题"),
+            None,
         )
         .unwrap();
     assert_eq!(n.prompt.as_deref(), Some("用户原问题"));
 
     // 普通编辑（不传 source）→ prompt 必须保留
-    let edited = db.update_note(n.id, "用户改写后", None, 0, None).unwrap();
+    let edited = db.update_note(n.id, "用户改写后", None, 0, None, None).unwrap();
     assert_eq!(edited.prompt.as_deref(), Some("用户原问题"));
     assert_eq!(edited.content, "用户改写后");
+}
+
+#[test]
+fn migrate_adds_page_idx_column_to_notes() {
+    // Phase 6 增量：notes 表新增 page_idx 列（PDF 笔记需要页码定位）。
+    // 老库（无 page_idx 列）必须被自动 ALTER，老笔记的 page_idx 全为 NULL。
+    let tmp = tempfile::tempdir().unwrap();
+    let mut db = Db::open(&tmp.path().join("t.db")).unwrap();
+    db.migrate().unwrap();
+    let rid = fixture_with_resource(&mut db);
+
+    let has: i64 = db
+        .conn
+        .query_row(
+            "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='page_idx'",
+            [],
+            |r| r.get(0),
+        )
+        .unwrap();
+    assert_eq!(has, 1, "notes 表必须有 page_idx 列");
+
+    // 老笔记（不传 page_idx）插入后 page_idx 为 NULL，向后兼容
+    let n = db.insert_note(rid, "AI 讲解内容", None, 0, "ai", None, None).unwrap();
+    assert_eq!(n.page_idx, None);
+}
+
+#[test]
+fn insert_note_with_page_idx_round_trips() {
+    // PDF 笔记需要带页码写入 + 回读
+    let tmp = tempfile::tempdir().unwrap();
+    let mut db = Db::open(&tmp.path().join("t.db")).unwrap();
+    db.migrate().unwrap();
+    let rid = fixture_with_resource(&mut db);
+
+    let n = db
+        .insert_note(rid, "PDF 笔记", Some("anchor"), 0, "user", None, Some(3))
+        .unwrap();
+    assert_eq!(n.page_idx, Some(3));
+    assert_eq!(n.anchor_text.as_deref(), Some("anchor"));
+
+    // list_notes 也能读回 page_idx
+    let listed = db.list_notes(rid).unwrap();
+    assert_eq!(listed[0].page_idx, Some(3));
+}
+
+#[test]
+fn update_note_preserves_page_idx_by_default() {
+    // 普通编辑（不传 page_idx）必须保留原 page_idx，否则翻页跳转会失效
+    let tmp = tempfile::tempdir().unwrap();
+    let mut db = Db::open(&tmp.path().join("t.db")).unwrap();
+    db.migrate().unwrap();
+    let rid = fixture_with_resource(&mut db);
+
+    let n = db
+        .insert_note(rid, "PDF 笔记", Some("anchor"), 0, "user", None, Some(5))
+        .unwrap();
+    assert_eq!(n.page_idx, Some(5));
+
+    // 普通编辑（不传 page_idx）→ page_idx 必须保留
+    let edited = db.update_note(n.id, "改写后", Some("anchor"), 0, None, None).unwrap();
+    assert_eq!(edited.page_idx, Some(5));
+    assert_eq!(edited.content, "改写后");
 }

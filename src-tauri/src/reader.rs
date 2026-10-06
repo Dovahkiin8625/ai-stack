@@ -12,7 +12,14 @@ use std::path::{Path, PathBuf};
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "camelCase", rename_all_fields = "camelCase")]
 pub enum ResourceContent {
-    Markdown { html: String, word_count: usize },
+    /// markdown：返回 comrak 渲染的 html + word 数 + 原始 markdown source。
+    /// source 字段是新增的 —— 编辑模式要把原文回传给前端做 textarea，
+    /// 不能只返 html（只返 html 就丢了原文，再读一次文件等于绕一圈）。
+    Markdown {
+        html: String,
+        word_count: usize,
+        markdown: String,
+    },
     /// PDF：只返回页数（用 pdf-extract 文本分页数）；前端 pdf.js 拿到
     /// `read_resource_bytes` 返回的原始字节后自行渲染并自带 text layer。
     Pdf { page_count: usize },
@@ -26,8 +33,12 @@ pub enum ResourceContent {
 pub fn read(absolute: &Path, kind: &str) -> Result<ResourceContent> {
     match kind {
         "markdown" => {
-            let (html, wc) = readers::markdown_extract(absolute)?;
-            Ok(ResourceContent::Markdown { html, word_count: wc })
+            let (html, wc, source) = readers::markdown_extract(absolute)?;
+            Ok(ResourceContent::Markdown {
+                html,
+                word_count: wc,
+                markdown: source,
+            })
         }
         "pdf" => {
             let count = readers::pdf_count_pages(absolute)?;

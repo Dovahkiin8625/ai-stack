@@ -2,11 +2,11 @@
 use crate::db::{Db, NoteRow, ResourceRow};
 use crate::reader::{self, ResourceContent};
 use crate::scanner::{self, ScanConfig, ScanSummary};
-use anyhow::Context;
+use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::{AppHandle, Emitter, Manager};
 
@@ -83,6 +83,8 @@ pub struct NoteDto {
     pub anchor_occurrence: i64,
     pub prompt: Option<String>,
     pub source: String,
+    /// PDF 笔记用的 0-based 页码。markdown/DOCX 笔记为 None。
+    pub page_idx: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -97,6 +99,7 @@ impl From<NoteRow> for NoteDto {
             anchor_occurrence: n.anchor_occurrence,
             prompt: n.prompt,
             source: n.source,
+            page_idx: n.page_idx,
             created_at: n.created_at,
             updated_at: n.updated_at,
         }
@@ -113,6 +116,9 @@ pub struct NotePayload {
     /// 笔记来源：'user' 人工添加 / 'ai' 大模型讲解。前端不传时默认 'user'。
     #[serde(default)]
     pub source: String,
+    /// PDF 笔记用的 0-based 页码。markdown/DOCX 笔记不传或传 null。
+    #[serde(default)]
+    pub page_idx: Option<i64>,
 }
 
 #[derive(Deserialize)]
@@ -125,6 +131,9 @@ pub struct NoteUpdatePayload {
     /// 编辑 AI 笔记时降级为 'user'；不传或为空则保留原 source。
     #[serde(default)]
     pub source: Option<String>,
+    /// 改 PDF 笔记页码时使用；不传或为 null 则保留原 page_idx（翻页跳转不失效）。
+    #[serde(default)]
+    pub page_idx: Option<i64>,
 }
 
 #[tauri::command]
@@ -205,6 +214,65 @@ pub fn read_resource(id: i64, app: AppHandle) -> Result<ResourceContent, String>
     reader::read(&abs, &kind).map_err(|e| format!("read {}: {e:#}", abs.display()))
 }
 
+/// 编辑模式的核心 helper：把新 markdown 写回文件 → 重新过 markdown_extract 拿新
+/// html/word 数 → 更新 resources 行的 size/word_count/indexed_at → 返回 (html, words)。
+///
+/// 拆成独立 pub 函数（而不是直接 inline 在 Tauri 命令里）有两个目的：
+/// 1. 测试不依赖 AppHandle，可以裸调用 Db + 路径
+/// 2. 命令端只剩"查 DB 找路径 + 调 helper"两件事，肉眼可审
+///
+/// 允许空 markdown —— 用户清空文件是合法操作；前端可以在保存前自检路径下是否还有
+/// 其它展示用的数据，但服务端不替它做内容策略判断。
+pub fn write_resource_markdown(
+    db: &Db,
+    resource_id: i64,
+    abs: &Path,
+    markdown: &str,
+) -> Result<(String, usize)> {
+    // 1. 写文件
+    std::fs::write(abs, markdown)
+        .with_context(|| format!("write {}", abs.display()))?;
+    // 3. 重新过 markdown_extract —— 保证返回的 html 是新内容（不是旧缓存）
+    let (html, words, _source) = crate::readers::markdown_extract(abs)?;
+    // 4. 同步刷新 DB 行的 size/word_count/indexed_at，否则下次 scanner 会用
+    //    旧 size 当差异判断依据，永远不再重新 extract 这条资源
+    db.update_resource_after_write(resource_id, markdown.len() as i64, words as i64)
+        .context("update resource row after write")?;
+    Ok((html, words))
+}
+
+#[tauri::command]
+pub fn write_resource(
+    id: i64,
+    markdown: String,
+    app: AppHandle,
+) -> Result<ResourceContent, String> {
+    let state: tauri::State<AppState> = app.state();
+    let db = Db::open(&state.db_path).map_err(|e| e.to_string())?;
+    // 复用 read_resource 的查 path + kind 逻辑：把 kind/路径 一次拿出来
+    let (category_path, rel_path, kind) = db
+        .conn
+        .query_row(
+            "SELECT category_path, rel_path, type FROM resources WHERE id = ?1",
+            [id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
+        )
+        .map_err(|e| format!("resource {id} not found: {e}"))?;
+    if kind != "markdown" {
+        return Err(format!(
+            "write_resource 仅支持 markdown 资源，resource {id} 是 {kind}"
+        ));
+    }
+    let abs = reader::resolve_absolute(&state.knowledge_root, &category_path, &rel_path);
+    let (html, word_count) =
+        write_resource_markdown(&db, id, &abs, &markdown).map_err(|e| format!("{e:#}"))?;
+    Ok(ResourceContent::Markdown {
+        html,
+        word_count,
+        markdown,
+    })
+}
+
 /// 返回资源的原始字节。
 ///
 /// 三类 reader 都用它拿原文件自己渲染：
@@ -277,6 +345,7 @@ pub fn create_note(payload: NotePayload, app: AppHandle) -> Result<NoteDto, Stri
         payload.anchor_occurrence,
         source,
         None, // 普通 create_note 永远没有 prompt（用户从右侧 composer 输入，不走 AI 问答流）
+        payload.page_idx,
     )
     .map(NoteDto::from)
     .map_err(|e| e.to_string())
@@ -298,6 +367,7 @@ pub fn update_note(payload: NoteUpdatePayload, app: AppHandle) -> Result<NoteDto
         payload.anchor_text.as_deref(),
         payload.anchor_occurrence,
         source,
+        payload.page_idx,
     )
     .map(NoteDto::from)
     .map_err(|e| e.to_string())
@@ -329,6 +399,9 @@ pub struct AiAnnotatePayload {
     /// 轻量模型不接收 thinking 字段，由前端路由保证不混用。
     pub performance_model: String,
     pub api_key: String,
+    /// PDF 笔记用的 0-based 页码。markdown/DOCX 不传（AI 注会写入 None）。
+    #[serde(default)]
+    pub page_idx: Option<i64>,
 }
 
 /// 单次流式 chunk 的事件载荷。前端 listen "ai-annotate-chunk" 拿到后
@@ -394,11 +467,13 @@ pub async fn start_ai_annotate(
             0,
             "ai",
             None, // AI 讲解场景：用户没问问题，prompt 永远为 None；走"询问 AI"走 start_ai_qa 才有 prompt
+            payload.page_idx,
         )
         .map_err(|e| e.to_string())?;
     let note_id = placeholder.id;
     let placeholder_anchor = placeholder.anchor_text.clone();
     let placeholder_occurrence = placeholder.anchor_occurrence;
+    let placeholder_page_idx = placeholder.page_idx;
 
     // 3. 后台任务：拉 Anthropic SSE 流 → 逐 chunk emit 事件 + 同步写 DB
     let app_clone = app.clone();
@@ -427,6 +502,7 @@ pub async fn start_ai_annotate(
                         placeholder_anchor.as_deref(),
                         placeholder_occurrence,
                         None,
+                        placeholder_page_idx, // 流式追加阶段保留原 page_idx
                     );
                 }
                 let _ = app_clone.emit(
@@ -461,6 +537,9 @@ pub struct AiAskPayload {
     /// 与 AI 讲解共用高性能模型；启用 extended thinking（claude-* 前缀启发式）
     pub performance_model: String,
     pub api_key: String,
+    /// PDF 笔记用的 0-based 页码。markdown/DOCX 不传（AI 问答会写入 None）。
+    #[serde(default)]
+    pub page_idx: Option<i64>,
 }
 
 #[tauri::command]
@@ -500,11 +579,13 @@ pub async fn start_ai_qa(payload: AiAskPayload, app: AppHandle) -> Result<NoteDt
             0,
             "ai",
             Some(question), // <-- QA 场景：prompt = 用户问题
+            payload.page_idx,
         )
         .map_err(|e| e.to_string())?;
     let note_id = placeholder.id;
     let placeholder_anchor = placeholder.anchor_text.clone();
     let placeholder_occurrence = placeholder.anchor_occurrence;
+    let placeholder_page_idx = placeholder.page_idx;
 
     // 3. 后台任务：与 AI 讲解共用流式逻辑，但事件名 + 错误前缀不同（QA 专属），
     // prompt 也由 build_qa_prompt 拼装（用户问题替换"讲解"角色）。
@@ -534,6 +615,7 @@ pub async fn start_ai_qa(payload: AiAskPayload, app: AppHandle) -> Result<NoteDt
                         placeholder_anchor.as_deref(),
                         placeholder_occurrence,
                         None,
+                        placeholder_page_idx, // 流式追加阶段保留原 page_idx
                     );
                 }
                 let _ = app_clone.emit(
@@ -723,12 +805,14 @@ async fn stream_ai_annotation(
             );
 
             // 同步写 DB —— 即使前端关掉面板，笔记也是完整的
-            // source 在流式追加阶段保持不变（仍是 'ai'），用户编辑后才降级
+            // source / page_idx 在流式追加阶段保持不变（仍是 'ai' / 原页码），
+            // 用户编辑后才降级；传 None 让 update_note 走"保留"路径。
             let _ = db.update_note(
                 note_id,
                 &accumulated,
                 anchor_text.as_deref(),
                 anchor_occurrence,
+                None,
                 None,
             );
         }
@@ -828,13 +912,15 @@ async fn stream_ai_qa(
             );
 
             // 同步写 DB —— 即使前端关掉面板，笔记也是完整的
-            // source 在流式追加阶段保持 'ai'；用户编辑后才降级
-            // prompt 在 insert 时已写入，update 不再触碰（保留用户原问题）
+            // source / page_idx 在流式追加阶段保持不变（仍是 'ai' / 原页码），
+            // 用户编辑后才降级；传 None 让 update_note 走"保留"路径。
+            // prompt 在 insert 时已写入，update 不再触碰（保留用户原问题）。
             let _ = db.update_note(
                 note_id,
                 &accumulated,
                 anchor_text.as_deref(),
                 anchor_occurrence,
+                None,
                 None,
             );
         }

@@ -27,6 +27,20 @@ export async function readResource(id: number): Promise<ResourceContent> {
 }
 
 /**
+ * 把编辑后的 markdown 写回文件 + 同步 DB 行。
+ * 后端 write_resource 命令会重新 comrak 提取 html / word 数并返回新的 ResourceContent，
+ * 前端拿到后直接 swap 进 store —— 不需要再调一次 read_resource。
+ *
+ * 仅支持 markdown 资源；其它类型后端会抛 "write_resource 仅支持 markdown"。
+ */
+export async function writeResource(
+  id: number,
+  markdown: string,
+): Promise<ResourceContent> {
+  return invoke<ResourceContent>('write_resource', { id, markdown });
+}
+
+/**
  * 读取并解析子分类目录下的 `_index.md`，得到结构化的条目列表
  * （含每篇文章的简介）。编辑 `_index.md` 后无需重启，调用一次即可。
  */
@@ -106,6 +120,8 @@ export interface AiAnnotateInput {
   baseUrl: string;
   performanceModel: string;
   apiKey: string;
+  /** PDF 笔记用的 0-based 页码。markdown/DOCX 不传。 */
+  pageIdx?: number | null;
 }
 
 /**
@@ -130,6 +146,8 @@ export interface AiAskInput {
   baseUrl: string;
   performanceModel: string;
   apiKey: string;
+  /** PDF 笔记用的 0-based 页码。markdown/DOCX 不传。 */
+  pageIdx?: number | null;
 }
 
 /**

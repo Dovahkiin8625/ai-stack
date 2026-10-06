@@ -1,11 +1,10 @@
-mod menu;
 pub mod db;
 pub mod scanner;
 pub mod reader;
 pub mod commands;
 pub mod readers;
 
-use tauri::{Emitter, Manager};
+use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
@@ -16,11 +15,6 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
-            let menu = menu::build_menu(app.handle())?;
-            app.set_menu(menu)?;
-            app.on_menu_event(|app, event| {
-                let _ = app.emit("menu", event.id().0.as_str());
-            });
             // AppState 只持有不可变路径；不可在 commands::build_state 之后再修改
             app.manage(commands::build_state(app.handle()));
             Ok(())
@@ -31,6 +25,7 @@ pub fn run() {
             commands::list_resources,
             commands::read_resource,
             commands::read_resource_bytes,
+            commands::write_resource,
             commands::read_subcategory_index,
             commands::list_notes,
             commands::create_note,

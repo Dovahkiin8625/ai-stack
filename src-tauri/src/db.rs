@@ -53,6 +53,9 @@ pub struct NoteRow {
     /// 渲染"❓ 提问"块，让回看时知道这条答案是回答什么问题的。
     pub prompt: Option<String>,
     pub source: String,
+    /// PDF 笔记用的 0-based 页码定位。markdown/DOCX 笔记为 None。
+    /// 老笔记全为 None，向后兼容。
+    pub page_idx: Option<i64>,
     pub created_at: String,
     pub updated_at: String,
 }
@@ -152,6 +155,18 @@ impl Db {
             .unwrap_or(0);
         if has_prompt == 0 {
             tx.execute("ALTER TABLE notes ADD COLUMN prompt TEXT", [])?;
+        }
+        // Phase 6 增量：notes 表新增 page_idx 列（PDF 笔记页码定位）。
+        // 老笔记 page_idx 全为 NULL（向后兼容）；markdown/DOCX 笔记也保持 NULL。
+        let has_page_idx: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('notes') WHERE name='page_idx'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_page_idx == 0 {
+            tx.execute("ALTER TABLE notes ADD COLUMN page_idx INTEGER", [])?;
         }
         let now = chrono::Utc::now().to_rfc3339();
         tx.execute(
@@ -307,7 +322,7 @@ impl Db {
     pub fn list_notes(&self, resource_id: i64) -> Result<Vec<NoteRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, resource_id, content, anchor_text, anchor_occurrence,
-                    prompt, source, created_at, updated_at
+                    prompt, source, page_idx, created_at, updated_at
              FROM notes WHERE resource_id = ?1
              ORDER BY id",
         )?;
@@ -321,8 +336,9 @@ impl Db {
                     anchor_occurrence: row.get(4)?,
                     prompt: row.get(5)?,
                     source: row.get(6)?,
-                    created_at: row.get(7)?,
-                    updated_at: row.get(8)?,
+                    page_idx: row.get(7)?,
+                    created_at: row.get(8)?,
+                    updated_at: row.get(9)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -339,12 +355,14 @@ impl Db {
         // 仅"用户问 AI" 场景使用（AI 讲解场景传 None）。
         // 存进 DB 后由 list_notes / get_note 回读，笔记卡片不再用。
         prompt: Option<&str>,
+        // PDF 笔记用的 0-based 页码定位。markdown/DOCX 笔记为 None。
+        page_idx: Option<i64>,
     ) -> Result<NoteRow> {
         let now = chrono::Utc::now().to_rfc3339();
         self.conn.execute(
             "INSERT INTO notes (resource_id, content, anchor_text, anchor_occurrence,
-                                source, prompt, created_at, updated_at)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?7)",
+                                source, prompt, page_idx, created_at, updated_at)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?8)",
             params![
                 resource_id,
                 content,
@@ -352,6 +370,7 @@ impl Db {
                 anchor_occurrence,
                 source,
                 prompt,
+                page_idx,
                 now
             ],
         )?;
@@ -366,19 +385,36 @@ impl Db {
         anchor_text: Option<&str>,
         anchor_occurrence: i64,
         source: Option<&str>,
+        // 普通编辑（None）保留原 page_idx，避免翻页跳转失效；
+        // 重设时 Some(idx) 写新值，仅 PDF 笔记需要。
+        page_idx: Option<i64>,
     ) -> Result<NoteRow> {
-        // source 字段：只有 Some(_) 时才写入，避免每次普通编辑都重写 source；
-        // AI 笔记被用户编辑后降级为 'user'，是这里唯一会传 Some 的场景。
+        // source / page_idx 字段：只有 Some(_) 时才写入，避免每次普通编辑都重写；
+        // 4 个分支覆盖所有 (source, page_idx) 组合，保持 SQL 显式（无 COALESCE）。
         let now = chrono::Utc::now().to_rfc3339();
-        let changed = match source {
-            Some(src) => self.conn.execute(
+        let changed = match (source, page_idx) {
+            (Some(src), Some(idx)) => self.conn.execute(
+                "UPDATE notes
+                 SET content = ?1, anchor_text = ?2, anchor_occurrence = ?3,
+                     source = ?4, page_idx = ?5, updated_at = ?6
+                 WHERE id = ?7",
+                params![content, anchor_text, anchor_occurrence, src, idx, now, id],
+            )?,
+            (Some(src), None) => self.conn.execute(
                 "UPDATE notes
                  SET content = ?1, anchor_text = ?2, anchor_occurrence = ?3,
                      source = ?4, updated_at = ?5
                  WHERE id = ?6",
                 params![content, anchor_text, anchor_occurrence, src, now, id],
             )?,
-            None => self.conn.execute(
+            (None, Some(idx)) => self.conn.execute(
+                "UPDATE notes
+                 SET content = ?1, anchor_text = ?2, anchor_occurrence = ?3,
+                     page_idx = ?4, updated_at = ?5
+                 WHERE id = ?6",
+                params![content, anchor_text, anchor_occurrence, idx, now, id],
+            )?,
+            (None, None) => self.conn.execute(
                 "UPDATE notes
                  SET content = ?1, anchor_text = ?2, anchor_occurrence = ?3, updated_at = ?4
                  WHERE id = ?5",
@@ -399,12 +435,35 @@ impl Db {
         Ok(())
     }
 
+    /// write_resource 命令写完文件后调用：刷新 size_bytes / word_count / indexed_at。
+    /// 不动 title / type / category_path / rel_path / mtime（这些都是身份字段），
+    /// 也不动 page_count（markdown 永远为 NULL）。
+    /// 不存在 → 抛错（调用方应保证 id 来自同一次 query_row）。
+    pub fn update_resource_after_write(
+        &self,
+        id: i64,
+        size_bytes: i64,
+        word_count: i64,
+    ) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        let changed = self.conn.execute(
+            "UPDATE resources
+             SET size_bytes = ?1, word_count = ?2, indexed_at = ?3
+             WHERE id = ?4",
+            params![size_bytes, word_count, now, id],
+        )?;
+        if changed == 0 {
+            anyhow::bail!("resource {id} not found");
+        }
+        Ok(())
+    }
+
     fn get_note(&self, id: i64) -> Result<NoteRow> {
         let row = self
             .conn
             .query_row(
                 "SELECT id, resource_id, content, anchor_text, anchor_occurrence,
-                        prompt, source, created_at, updated_at
+                        prompt, source, page_idx, created_at, updated_at
                  FROM notes WHERE id = ?1",
                 [id],
                 |r| {
@@ -416,8 +475,9 @@ impl Db {
                         anchor_occurrence: r.get(4)?,
                         prompt: r.get(5)?,
                         source: r.get(6)?,
-                        created_at: r.get(7)?,
-                        updated_at: r.get(8)?,
+                        page_idx: r.get(7)?,
+                        created_at: r.get(8)?,
+                        updated_at: r.get(9)?,
                     })
                 },
             )

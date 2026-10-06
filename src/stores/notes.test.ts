@@ -17,6 +17,7 @@ function makeNote(overrides: Partial<{
   anchorText: string | null;
   anchorOccurrence: number;
   source: 'user' | 'ai';
+  pageIdx: number | null;
   createdAt: string;
   updatedAt: string;
 }> = {}) {
@@ -27,6 +28,7 @@ function makeNote(overrides: Partial<{
     anchorText: null,
     anchorOccurrence: 0,
     source: 'user' as const,
+    pageIdx: null,
     createdAt: '2026-01-01T00:00:00Z',
     updatedAt: '2026-01-01T00:00:00Z',
     ...overrides,
@@ -93,6 +95,57 @@ describe('notes store — AI 标注编辑时降级为用户笔记', () => {
     const callArg = mockUpdate.mock.calls[0][0];
     expect(callArg.source).toBeUndefined();
     expect(useNotesStore.getState().notes[0].source).toBe('user');
+  });
+});
+
+describe('notes store — PDF 笔记的 pageIdx 流转', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    useNotesStore.setState({
+      resourceId: 1,
+      notes: [],
+      loading: false,
+      panelOpen: false,
+    });
+  });
+
+  it('create() 把 pageIdx 透传给后端', async () => {
+    vi.mocked(api.createNote).mockResolvedValueOnce(
+      makeNote({ id: 300, content: 'PDF 笔记', pageIdx: 5 }),
+    );
+    await useNotesStore.getState().create({
+      content: 'PDF 笔记',
+      anchorText: 'foo',
+      anchorOccurrence: 0,
+      pageIdx: 5,
+    });
+    expect(api.createNote).toHaveBeenCalledWith({
+      resourceId: 1,
+      content: 'PDF 笔记',
+      anchorText: 'foo',
+      anchorOccurrence: 0,
+      source: undefined,
+      pageIdx: 5,
+    });
+  });
+
+  it('create() 不传 pageIdx 时透传 undefined（markdown/DOCX 笔记 pageIdx 为 null）', async () => {
+    vi.mocked(api.createNote).mockResolvedValueOnce(
+      makeNote({ id: 301, content: '普通笔记' }),
+    );
+    await useNotesStore.getState().create({
+      content: '普通笔记',
+      anchorText: null,
+      anchorOccurrence: 0,
+    });
+    expect(api.createNote).toHaveBeenCalledWith({
+      resourceId: 1,
+      content: '普通笔记',
+      anchorText: null,
+      anchorOccurrence: 0,
+      source: undefined,
+      pageIdx: undefined,
+    });
   });
 });
 

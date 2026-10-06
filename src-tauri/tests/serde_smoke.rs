@@ -70,11 +70,19 @@ fn resource_content_markdown_variant_serializes_camel_case() {
     let content = ResourceContent::Markdown {
         html: "<p>hi</p>".into(),
         word_count: 1,
+        markdown: "# hi".into(),
     };
     let json = serde_json::to_string(&content).expect("serialize");
     // Discriminator is lowercased from the PascalCase variant name.
     assert!(json.contains("\"type\":\"markdown\""), "missing type=markdown: {json}");
     assert!(json.contains("\"wordCount\":1"), "missing wordCount: {json}");
+    // 编辑模式依赖：原始 markdown 文本必须出现在 IPC payload 里，前端 textarea 直接绑定。
+    assert!(json.contains("\"markdown\""), "missing markdown key: {json}");
+    let needle = "# hi";
+    assert!(
+        json.contains(needle),
+        "markdown 原文必须出现在 JSON payload 里，实际: {json}"
+    );
     assert!(!json.contains("word_count"), "snake_case leaked: {json}");
 }
 

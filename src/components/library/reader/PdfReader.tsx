@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { forwardRef, useEffect, useImperativeHandle, useMemo, useRef, useState } from 'react';
 import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react';
 import * as pdfjsLib from 'pdfjs-dist';
 import type { PDFDocumentProxy, PDFPageProxy } from 'pdfjs-dist';
@@ -6,18 +6,66 @@ import type { TextLayer } from 'pdfjs-dist/types/src/display/text_layer';
 // Vite 把 worker 当资源处理，打包时复制到 dist 并返回最终 URL
 import workerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url';
 import * as api from '../../../lib/library-api';
+import type { Note } from '../../../types';
+import {
+  computeAnchor,
+  extractContext,
+  insertNoteMarkers,
+  unwrapAnchors,
+} from '../../../lib/anchor';
+import AskInputBox from './AskInputBox';
+import SelectionMenu from './SelectionMenu';
+
+export interface PdfReaderHandle {
+  scrollToAnchor: (noteId: number) => void;
+}
 
 interface Props {
   /** 资源 ID：用于 readResourceBytes 加载 PDF。 */
   resourceId: number;
   /** 总页数，由 read_resource 提前返回（让 UI 立即显示页码）。 */
   pageCount: number;
+  /** 资源下的笔记列表；用于插入角标。 */
+  notes?: Note[];
+  /** 用户点击 <sup.note-marker> 时通知父组件。 */
+  onMarkClick?: (noteId: number) => void;
+  /** "添加批注"：reader 算好 anchor 后通知父组件。父组件去 createNote + 打开抽屉。 */
+  onAddNoteAtSelection?: (input: {
+    anchorText: string;
+    anchorOccurrence: number;
+    pageIdx: number;
+  }) => void;
+  /** "AI 讲解"：reader 算好上下文 + pageIdx，丢给父组件调 LLM。 */
+  onAiAnnotate?: (input: {
+    selectedText: string;
+    contextBefore: string;
+    contextAfter: string;
+    sectionTitle: string;
+    anchorText: string;
+    anchorOccurrence: number;
+    pageIdx: number;
+  }) => Promise<void>;
+  /** "询问 AI"：reader 算好上下文 + pageIdx，开 AskInputBox 让用户输入问题。 */
+  onAiAsk?: (input: {
+    selectedText: string;
+    contextBefore: string;
+    contextAfter: string;
+    sectionTitle: string;
+    anchorText: string;
+    anchorOccurrence: number;
+    pageIdx: number;
+    question: string;
+  }) => Promise<void>;
 }
 
 const PREFETCH_RADIUS = 2;
 const FALLBACK_DPR = 1;
 const MIN_TARGET_WIDTH = 480;
 const MAX_TARGET_WIDTH = 2400;
+
+/** 当单页可见文本 < 这个阈值时，整页直接作为 contextBefore + contextAfter，
+ *  避免给 LLM 喂半页造成上下文缺失。 */
+const WHOLE_PAGE_CONTEXT_THRESHOLD = 300;
 
 // 在模块加载时设置一次 worker；同一个 webview 生命周期内不会变
 pdfjsLib.GlobalWorkerOptions.workerSrc = workerUrl;
@@ -97,11 +145,18 @@ const TEXT_LAYER_CSS = `
  * 4. 预取相邻 ±2 页：拿 PDFPageProxy 缓存起来；canvas/textLayer 不预渲染（耗内存）
  * 5. 翻页/卸载调 `page.cleanup()` + `textLayer.cancel()` 释放 pdf.js 内部资源
  *
- * 老的 PNG canvas 实现无法选中文本，已弃用。
+ * 笔记功能（Phase 6）：
+ * 6. 容器 onContextMenu：在 textLayer 内右键选中 → 算 anchor → 开 SelectionMenu
+ * 7. 每次重画当前页 → unwrapAnchors + insertNoteMarkers 注回当前页的 textLayer
+ * 8. forwardRef.scrollToAnchor(noteId)：切到 note.pageIdx，然后 scrollIntoView + flash
  */
-export default function PdfReader({ resourceId, pageCount }: Props) {
+export default forwardRef<PdfReaderHandle, Props>(function PdfReader(
+  { resourceId, pageCount, notes = [], onMarkClick, onAddNoteAtSelection, onAiAnnotate, onAiAsk },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null);
   const hostRef = useRef<HTMLDivElement>(null);
+  const textLayerElRef = useRef<HTMLDivElement | null>(null);
   const [idx, setIdx] = useState(0);
   const [containerWidth, setContainerWidth] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -116,6 +171,24 @@ export default function PdfReader({ resourceId, pageCount }: Props) {
   const textLayerRef = useRef<TextLayer | null>(null);
   const currentPageRef = useRef<PDFPageProxy | null>(null);
   const cssInjectedRef = useRef(false);
+
+  // 浮层状态：右键唤起的 SelectionMenu；以及"询问 AI"浮层输入框
+  const [menu, setMenu] = useState<{
+    x: number;
+    y: number;
+    anchorText: string;
+    anchorOccurrence: number;
+  } | null>(null);
+  const [askBox, setAskBox] = useState<{
+    x: number;
+    y: number;
+    selectedText: string;
+    contextBefore: string;
+    contextAfter: string;
+    sectionTitle: string;
+    anchorText: string;
+    anchorOccurrence: number;
+  } | null>(null);
 
   // 注入 text layer CSS 到 document head
   useEffect(() => {
@@ -139,6 +212,7 @@ export default function PdfReader({ resourceId, pageCount }: Props) {
       textLayerRef.current = null;
     }
     currentPageRef.current = null;
+    textLayerElRef.current = null;
     // 关掉旧 PDF（destroy 会顺带释放所有内部缓存的 page proxy）
     if (pdfRef.current) {
       void pdfRef.current.destroy();
@@ -220,6 +294,7 @@ export default function PdfReader({ resourceId, pageCount }: Props) {
       textLayerRef.current = null;
     }
     currentPageRef.current = null;
+    textLayerElRef.current = null;
 
     (async () => {
       // 直接让 pdf.js 给 page proxy —— 它自己内部有 _pagePromises 缓存。
@@ -262,6 +337,7 @@ export default function PdfReader({ resourceId, pageCount }: Props) {
       // 直接乘 var(--scale-factor) 给容器 width/height）。
       textLayerDiv.style.setProperty('--scale-factor', String(scale));
       host.appendChild(textLayerDiv);
+      textLayerElRef.current = textLayerDiv;
 
       // text layer（要先于 canvas 渲染，因为 layout 尺寸由它撑开）
       const textContent = await page.getTextContent();
@@ -294,12 +370,23 @@ export default function PdfReader({ resourceId, pageCount }: Props) {
 
       currentPageRef.current = page;
       setLoading(false);
+      // 当前页重画完 → 插入笔记角标
+      insertNoteMarkers(textLayerDiv, notes);
     })();
     // deps 含 loading（取反）：PDF 从 null 变 ready 时也必须重跑 —— 仅靠 setLoading
     // 副作用让 React 知道该重画一次。其它依赖（idx、targetWidthPx、pageCount）
     // 仍然是触发翻页/缩放重渲染的关键。
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [idx, targetWidthPx, effectivePageCount, loading]);
+
+  // notes 变化时，只在当前页 textLayer 里重做角标插入（不重画 PDF）。
+  // 翻页 / 重画会在上面那个 effect 末尾自己跑 insertNoteMarkers，这里只用 effect 接 notes 变更。
+  useEffect(() => {
+    const textLayer = textLayerElRef.current;
+    if (!textLayer) return;
+    unwrapAnchors(textLayer);
+    insertNoteMarkers(textLayer, notes);
+  }, [notes, idx]);
 
   // 预取相邻 ±PREFETCH_RADIUS 页：触发 pdf.js 内部缓存命中，
   // 让用户翻页时 `pdf.getPage(idx+1)` 是 0ms。我们不存外部缓存，
@@ -322,12 +409,181 @@ export default function PdfReader({ resourceId, pageCount }: Props) {
   const goPrev = () => setIdx((i) => Math.max(0, i - 1));
   const goNext = () => setIdx((i) => Math.min(effectivePageCount - 1, i + 1));
 
+  // 右键唤起浮层菜单：选中文本后右键出现 SelectionMenu（5 项）。
+  // 没选中或选区不在当前页 textLayer 内 → 不 preventDefault，让浏览器显示默认菜单。
+  const handleContextMenu = (e: React.MouseEvent) => {
+    const sel = window.getSelection();
+    if (!sel || sel.isCollapsed || sel.rangeCount === 0) return;
+    const range = sel.getRangeAt(0);
+    const textLayer = textLayerElRef.current;
+    if (!textLayer || !textLayer.contains(range.commonAncestorContainer)) return;
+
+    const text = range.toString().trim();
+    if (text.length < 2 || text.length > 500) return;
+
+    const { anchorText, anchorOccurrence } = computeAnchor(textLayer, range);
+    if (!anchorText) return;
+
+    e.preventDefault();
+    setMenu({ x: e.clientX, y: e.clientY, anchorText, anchorOccurrence });
+  };
+
+  // PDF 单页 没有外可见 h1/h2/h3：把"页码"作为 sectionTitle，章节定位的退化。
+  // 整页文本 < 阈值时，直接当 contextBefore + contextAfter，避免给 LLM 喂半页。
+  const computeContext = (textLayer: HTMLElement, range: Range) => {
+    const ctx = extractContext(textLayer, range);
+    const wholePageText = textLayer.textContent?.replace(/\s+/g, ' ').trim() ?? '';
+    if (wholePageText.length < WHOLE_PAGE_CONTEXT_THRESHOLD) {
+      return {
+        ...ctx,
+        sectionTitle: `第 ${idx + 1} 页`,
+        contextBefore: wholePageText,
+        contextAfter: wholePageText,
+      };
+    }
+    return { ...ctx, sectionTitle: `第 ${idx + 1} 页` };
+  };
+
+  // SelectionMenu 上的"AI 讲解"按钮：从当前选区取"第 N 页"上下文（章节定位退化），
+  // 丢给父组件去调 LLM 并建笔记。父组件拿到占位笔记后立刻打开抽屉显示。
+  const handleAiAnnotate = () => {
+    if (!onAiAnnotate || !menu) return;
+    const sel = window.getSelection();
+    const textLayer = textLayerElRef.current;
+    if (!sel || sel.rangeCount === 0 || !textLayer) return;
+    const range = sel.getRangeAt(0);
+    if (!textLayer.contains(range.commonAncestorContainer)) return;
+    const selectedText = sel.toString().trim();
+    if (!selectedText) return;
+    const ctx = computeContext(textLayer, range);
+    void onAiAnnotate({
+      selectedText,
+      contextBefore: ctx.contextBefore,
+      contextAfter: ctx.contextAfter,
+      sectionTitle: ctx.sectionTitle,
+      anchorText: menu.anchorText,
+      anchorOccurrence: menu.anchorOccurrence,
+      pageIdx: idx,
+    }).catch((e) => console.error('[pdf] AI explain failed', e));
+  };
+
+  // SelectionMenu 上的"询问 AI"：关菜单 → 开 AskInputBox 让用户输入问题 → 提交。
+  const handleAiAskOpen = () => {
+    if (!onAiAsk || !menu) return;
+    const sel = window.getSelection();
+    const textLayer = textLayerElRef.current;
+    if (!sel || sel.rangeCount === 0 || !textLayer) return;
+    const range = sel.getRangeAt(0);
+    if (!textLayer.contains(range.commonAncestorContainer)) return;
+    const selectedText = sel.toString().trim();
+    if (!selectedText) return;
+    const ctx = computeContext(textLayer, range);
+    setAskBox({
+      x: menu.x,
+      y: menu.y,
+      selectedText,
+      contextBefore: ctx.contextBefore,
+      contextAfter: ctx.contextAfter,
+      sectionTitle: ctx.sectionTitle,
+      anchorText: menu.anchorText,
+      anchorOccurrence: menu.anchorOccurrence,
+    });
+  };
+
+  const handleAiAskSubmit = (question: string) => {
+    if (!onAiAsk || !askBox) return;
+    const a = askBox;
+    setAskBox(null);
+    void onAiAsk({
+      selectedText: a.selectedText,
+      contextBefore: a.contextBefore,
+      contextAfter: a.contextAfter,
+      sectionTitle: a.sectionTitle,
+      anchorText: a.anchorText,
+      anchorOccurrence: a.anchorOccurrence,
+      pageIdx: idx,
+      question,
+    }).catch((e) => console.error('[pdf] AI ask failed', e));
+  };
+
+  const handleAiAskCancel = () => setAskBox(null);
+
+  useEffect(() => {
+    if (!askBox) return;
+    const close = () => setAskBox(null);
+    const onMouseDown = (e: MouseEvent) => {
+      const target = e.target as HTMLElement | null;
+      if (target?.closest('[data-ask-input-box]')) return;
+      close();
+    };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') close();
+    };
+    const id = window.setTimeout(() => {
+      document.addEventListener('mousedown', onMouseDown);
+      document.addEventListener('keydown', onKey);
+    }, 0);
+    return () => {
+      clearTimeout(id);
+      document.removeEventListener('mousedown', onMouseDown);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [askBox]);
+
+  // 点击 <sup.note-marker> → 通知父组件
+  const handleClick = (e: React.MouseEvent) => {
+    const target = e.target as HTMLElement | null;
+    const marker = target?.closest('sup.note-marker') as HTMLElement | null;
+    if (!marker) return;
+    const id = Number(marker.dataset.noteId);
+    if (!Number.isFinite(id)) return;
+    onMarkClick?.(id);
+  };
+
+  // 跳转到某条笔记：切到对应页 → scrollIntoView → flash 动画
+  useImperativeHandle(ref, () => ({
+    scrollToAnchor(noteId: number) {
+      const note = notes.find((n) => n.id === noteId);
+      if (!note || note.pageIdx == null) return;
+      const targetPage = note.pageIdx;
+      if (targetPage !== idx) {
+        setIdx(targetPage);
+        // 翻页后 textLayer 才刚被 render effect 重建，marker 还没插入。
+        // 等 idx 变更触发重画完，再 scrollIntoView —— 用 setTimeout 0 等同 tick。
+        // 这里不能直接 querySelector，因为翻页未完成。
+        setTimeout(() => {
+          const root = textLayerElRef.current;
+          const marker = root?.querySelector<HTMLElement>(
+            `sup.note-marker[data-note-id="${noteId}"]`,
+          );
+          if (!marker) return;
+          marker.scrollIntoView({ behavior: 'smooth', block: 'center' });
+          marker.classList.remove('note-flash');
+          void marker.offsetWidth;
+          marker.classList.add('note-flash');
+        }, 50);
+        return;
+      }
+      const root = textLayerElRef.current;
+      const marker = root?.querySelector<HTMLElement>(
+        `sup.note-marker[data-note-id="${noteId}"]`,
+      );
+      if (!marker) return;
+      marker.scrollIntoView({ behavior: 'smooth', block: 'center' });
+      marker.classList.remove('note-flash');
+      void marker.offsetWidth;
+      marker.classList.add('note-flash');
+    },
+  }));
+
   return (
     <div className="flex h-full flex-col">
       <Toolbar idx={idx} pageCount={effectivePageCount} onPrev={goPrev} onNext={goNext} />
       <div
         ref={containerRef}
         className="relative flex-1 overflow-auto bg-surface-2"
+        onContextMenu={handleContextMenu}
+        onClick={handleClick}
       >
         {/* pdf.js canvas + textLayer 都挂到这个 host 上，host 尺寸由 viewport 决定 */}
         <div className="mx-auto my-4 block w-fit">
@@ -345,9 +601,30 @@ export default function PdfReader({ resourceId, pageCount }: Props) {
           </div>
         )}
       </div>
+      {menu && (
+        <SelectionMenu
+          x={menu.x}
+          y={menu.y}
+          anchorText={menu.anchorText}
+          anchorOccurrence={menu.anchorOccurrence}
+          onAddNote={(input) => {
+            onAddNoteAtSelection?.({ ...input, pageIdx: idx });
+          }}
+          onAiAnnotate={onAiAnnotate ? handleAiAnnotate : undefined}
+          onAiAsk={onAiAsk ? handleAiAskOpen : undefined}
+          onClose={() => setMenu(null)}
+        />
+      )}
+      {askBox && (
+        <AskInputBox
+          position={{ x: askBox.x, y: askBox.y }}
+          onSubmit={handleAiAskSubmit}
+          onCancel={handleAiAskCancel}
+        />
+      )}
     </div>
   );
-}
+});
 
 interface ToolbarProps {
   idx: number;

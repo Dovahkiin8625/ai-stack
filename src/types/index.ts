@@ -79,7 +79,17 @@ export interface SubcategoryIndex {
 }
 
 export type ResourceContent =
-  | { type: 'markdown'; html: string; wordCount: number }
+  | {
+      type: 'markdown';
+      /** comrak 渲染后的 HTML —— 预览模式直接 dangerouslySetInnerHTML 用 */
+      html: string;
+      wordCount: number;
+      /**
+       * 原始 markdown 文本 —— 编辑模式的初始值。
+       * 后端 read_resource / write_resource 都返回原文；前端切到编辑模式时绑定到 textarea。
+       */
+      markdown: string;
+    }
   | {
       type: 'pdf';
       /** 总页数（read_resource 一次性返回，避免栅格化所有页的 ~22s 延迟）。 */
@@ -128,6 +138,11 @@ export interface Note {
   prompt?: string | null;
   /** 笔记来源：'user' 人工添加 / 'ai' 大模型讲解 */
   source: NoteSource;
+  /**
+   * PDF 笔记用的 0-based 页码定位。markdown/DOCX 笔记为 null。
+   * 老笔记全为 null，向后兼容；翻页跳转走 NotePanel → readerRef.scrollToAnchor。
+   */
+  pageIdx?: number | null;
   createdAt: string;
   updatedAt: string;
 }
@@ -139,6 +154,8 @@ export interface NewNoteInput {
   anchorOccurrence: number;
   /** 留空时后端默认 'user' */
   source?: NoteSource;
+  /** PDF 笔记用的 0-based 页码；markdown/DOCX 不传（保持 null）。 */
+  pageIdx?: number | null;
 }
 
 export interface NoteUpdateInput {
@@ -151,4 +168,6 @@ export interface NoteUpdateInput {
    * 不传则保留原 source（向后兼容）。
    */
   source?: NoteSource;
+  /** 改 PDF 笔记页码时使用；不传则保留原 pageIdx（翻页跳转不失效）。 */
+  pageIdx?: number | null;
 }

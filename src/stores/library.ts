@@ -41,6 +41,12 @@ interface LibraryState {
   selectResource: (id: number | null) => Promise<void>;
   loadArticles: (path: string) => Promise<void>;
   loadIndex: (path: string) => Promise<void>;
+  /**
+   * write_resource 后端返的新 ResourceContent 直接塞进 store，不重走 selectResource。
+   * 避免：编辑模式保存后 selectResource 把 resourceContent 置 null 再重读 → 编辑器闪一下空。
+   * 也避免：selectResource 的 seq 检查误判为过期写入（编辑保存 → 重新 select 会被取消）。
+   */
+  updateResourceContent: (content: ResourceContent) => void;
   reset: () => void;
 }
 
@@ -156,6 +162,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
         indexByPath: { ...s.indexByPath, [path]: null },
       }));
     }
+  },
+
+  updateResourceContent: (content) => {
+    set({ resourceContent: content });
   },
 
   reset: () => set({

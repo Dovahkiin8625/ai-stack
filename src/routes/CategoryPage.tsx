@@ -10,8 +10,12 @@ import type { Resource } from '../types';
 import MarkdownReader, {
   type MarkdownReaderHandle,
 } from '../components/library/reader/MarkdownReader';
-import PdfReader from '../components/library/reader/PdfReader';
-import DocxReader from '../components/library/reader/DocxReader';
+import PdfReader, {
+  type PdfReaderHandle,
+} from '../components/library/reader/PdfReader';
+import DocxReader, {
+  type DocxReaderHandle,
+} from '../components/library/reader/DocxReader';
 import PptxReader from '../components/library/reader/PptxReader';
 import NotesPanel, {
   type NotesPanelHandle,
@@ -75,6 +79,15 @@ export default function CategoryPage() {
 
   useEffect(() => {
     if (selectedResource) {
+      // dirty guard：当前 MarkdownReader 还在编辑未保存 → 切换文章前确认一次
+      // 阻止 selectResource 把 textarea 内容顶没。拒绝则什么都不做（URL 已经变了，
+      // 用户从 sidebar 点错的文章，看不到内容就明白了）。
+      if (readerRef.current?.hasUnsavedChanges()) {
+        const ok = window.confirm(
+          '当前文章有未保存的修改，切换后将丢弃。是否继续？',
+        );
+        if (!ok) return;
+      }
       void selectResource(selectedResource.id);
     } else {
       void selectResource(null);
@@ -99,6 +112,8 @@ export default function CategoryPage() {
 
   // 双向定位的 ref 桥
   const readerRef = useRef<MarkdownReaderHandle>(null);
+  const pdfReaderRef = useRef<PdfReaderHandle>(null);
+  const docxReaderRef = useRef<DocxReaderHandle>(null);
   const notesPanelRef = useRef<NotesPanelHandle>(null);
 
   // 流式 AI 讲解 / AI 问答的监听器清理函数。每次 onAiAnnotate / onAiAsk 创建一组监听，
@@ -162,7 +177,18 @@ export default function CategoryPage() {
                   <MarkdownReader
                     ref={readerRef}
                     html={resourceContent.html}
+                    markdown={resourceContent.markdown}
                     notes={notes}
+                    onSaveMarkdown={async (next) => {
+                      if (!selectedResource) return;
+                      // write_resource 后端返回新 ResourceContent（已重新 comrak），
+                      // 直接塞进 store —— 不重走 selectResource，避免 editing textarea 被清。
+                      const fresh = await api.writeResource(
+                        selectedResource.id,
+                        next,
+                      );
+                      useLibraryStore.getState().updateResourceContent(fresh);
+                    }}
                     onMarkClick={(id) => {
                       // 用户点击正文 mark 时主动展开抽屉，否则抽屉关闭时完全看不见笔记
                       setPanelOpen(true);
@@ -240,14 +266,143 @@ export default function CategoryPage() {
                 )}
                 {resourceContent.type === 'pdf' && (
                   <PdfReader
+                    ref={pdfReaderRef}
                     resourceId={selectedResource.id}
                     pageCount={resourceContent.pageCount}
+                    notes={notes}
+                    onMarkClick={(id) => {
+                      setPanelOpen(true);
+                      notesPanelRef.current?.focusNote(id);
+                    }}
+                    onAddNoteAtSelection={async ({ anchorText, anchorOccurrence, pageIdx }) => {
+                      const note = await createNote({
+                        content: anchorText,
+                        anchorText,
+                        anchorOccurrence,
+                        pageIdx,
+                      });
+                      setPanelOpen(true);
+                      void note;
+                    }}
+                    onAiAnnotate={async (input) => {
+                      const settings = await getSettings();
+                      if (aiUnlistenRef.current) {
+                        void aiUnlistenRef.current();
+                        aiUnlistenRef.current = null;
+                      }
+                      const cleanup = await subscribeAiStream(
+                        'ai-annotate',
+                        'AI annotate error',
+                      );
+                      aiUnlistenRef.current = cleanup as unknown as UnlistenFn;
+                      const note = await api.startAiAnnotate({
+                        resourceId: selectedResource.id,
+                        selectedText: input.selectedText,
+                        contextBefore: input.contextBefore,
+                        contextAfter: input.contextAfter,
+                        sectionTitle: input.sectionTitle,
+                        pageIdx: input.pageIdx,
+                        baseUrl: settings.baseUrl,
+                        performanceModel: settings.performanceModel,
+                        apiKey: settings.apiKey,
+                      });
+                      useNotesStore.getState().addNote(note);
+                      setPanelOpen(true);
+                      notesPanelRef.current?.focusNote(note.id);
+                    }}
+                    onAiAsk={async (input) => {
+                      const settings = await getSettings();
+                      if (aiUnlistenRef.current) {
+                        void aiUnlistenRef.current();
+                        aiUnlistenRef.current = null;
+                      }
+                      const cleanup = await subscribeAiStream('ai-qa', 'AI ask error');
+                      aiUnlistenRef.current = cleanup as unknown as UnlistenFn;
+                      const note = await api.startAiAsk({
+                        resourceId: selectedResource.id,
+                        selectedText: input.selectedText,
+                        contextBefore: input.contextBefore,
+                        contextAfter: input.contextAfter,
+                        sectionTitle: input.sectionTitle,
+                        question: input.question,
+                        pageIdx: input.pageIdx,
+                        baseUrl: settings.baseUrl,
+                        performanceModel: settings.performanceModel,
+                        apiKey: settings.apiKey,
+                      });
+                      useNotesStore.getState().addNote(note);
+                      setPanelOpen(true);
+                      notesPanelRef.current?.focusNote(note.id);
+                    }}
                   />
                 )}
                 {resourceContent.type === 'docx' && (
                   <DocxReader
+                    ref={docxReaderRef}
                     resourceId={selectedResource.id}
                     wordCount={resourceContent.wordCount}
+                    notes={notes}
+                    onMarkClick={(id) => {
+                      setPanelOpen(true);
+                      notesPanelRef.current?.focusNote(id);
+                    }}
+                    onAddNoteAtSelection={async ({ anchorText, anchorOccurrence }) => {
+                      const note = await createNote({
+                        content: anchorText,
+                        anchorText,
+                        anchorOccurrence,
+                      });
+                      setPanelOpen(true);
+                      void note;
+                    }}
+                    onAiAnnotate={async (input) => {
+                      const settings = await getSettings();
+                      if (aiUnlistenRef.current) {
+                        void aiUnlistenRef.current();
+                        aiUnlistenRef.current = null;
+                      }
+                      const cleanup = await subscribeAiStream(
+                        'ai-annotate',
+                        'AI annotate error',
+                      );
+                      aiUnlistenRef.current = cleanup as unknown as UnlistenFn;
+                      const note = await api.startAiAnnotate({
+                        resourceId: selectedResource.id,
+                        selectedText: input.selectedText,
+                        contextBefore: input.contextBefore,
+                        contextAfter: input.contextAfter,
+                        sectionTitle: input.sectionTitle,
+                        baseUrl: settings.baseUrl,
+                        performanceModel: settings.performanceModel,
+                        apiKey: settings.apiKey,
+                      });
+                      useNotesStore.getState().addNote(note);
+                      setPanelOpen(true);
+                      notesPanelRef.current?.focusNote(note.id);
+                    }}
+                    onAiAsk={async (input) => {
+                      const settings = await getSettings();
+                      if (aiUnlistenRef.current) {
+                        void aiUnlistenRef.current();
+                        aiUnlistenRef.current = null;
+                      }
+                      const cleanup = await subscribeAiStream('ai-qa', 'AI ask error');
+                      aiUnlistenRef.current = cleanup as unknown as UnlistenFn;
+                      const note = await api.startAiAsk({
+                        resourceId: selectedResource.id,
+                        selectedText: input.selectedText,
+                        contextBefore: input.contextBefore,
+                        contextAfter: input.contextAfter,
+                        sectionTitle: input.sectionTitle,
+                        question: input.question,
+                        baseUrl: settings.baseUrl,
+                        performanceModel: settings.performanceModel,
+                        apiKey: settings.apiKey,
+                      });
+                      useNotesStore.getState().addNote(note);
+                      setPanelOpen(true);
+                      notesPanelRef.current?.focusNote(note.id);
+                    }}
                   />
                 )}
                 {resourceContent.type === 'pptx' && (
@@ -276,7 +431,18 @@ export default function CategoryPage() {
           </div>
           <NotesPanel
             ref={notesPanelRef}
-            onAnchorClick={(id) => readerRef.current?.scrollToAnchor(id)}
+            onAnchorClick={(id) => {
+              // 当前格式对应的 reader 才有 scrollToAnchor。markdown / pdf / docx 已支持；
+              // pptx 暂未支持笔记功能，notesPanel 里的笔记其实是 PDF 视角（schema 一致），
+              // 但 pptx 内的笔记没有对应 reader → 静默不跳转。
+              if (resourceContent?.type === 'markdown') {
+                readerRef.current?.scrollToAnchor(id);
+              } else if (resourceContent?.type === 'pdf') {
+                pdfReaderRef.current?.scrollToAnchor(id);
+              } else if (resourceContent?.type === 'docx') {
+                docxReaderRef.current?.scrollToAnchor(id);
+              }
+            }}
           />
         </>
       ) : (

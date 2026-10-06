@@ -21,7 +21,12 @@ const UNDERSCORE_PH: char = '\u{E000}';
 const ASTERISK_PH: char = '\u{E001}';
 const BACKSLASH_PH: char = '\u{E002}';
 
-pub fn extract(path: &Path) -> Result<(String, usize)> {
+/// 读 markdown 文件 → (html, word_count, source)。
+///
+/// 三元组里 source 是原始 markdown 文本：编辑模式需要把原文回传给前端做
+/// textarea 双向绑定，只回 html 不够 —— 用户编辑后切回预览用的是 comrak
+/// 重新渲染，所以 round-trip 不会丢失信息。
+pub fn extract(path: &Path) -> Result<(String, usize, String)> {
     let md = std::fs::read_to_string(path)
         .with_context(|| format!("read {}", path.display()))?;
     let mut opts = Options::default();
@@ -34,7 +39,7 @@ pub fn extract(path: &Path) -> Result<(String, usize)> {
     let html = markdown_to_html(&protected, &opts);
     let html = restore_math_emphasis(&html);
     let words = count_words(&md);
-    Ok((html, words))
+    Ok((html, words, md))
 }
 
 /// 在 `$...$` / `$$...$$` 区域内把 `_` / `*` 换成 PUA 占位符。

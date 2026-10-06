@@ -114,8 +114,10 @@ body {
 }
 .prose blockquote { border-left: 3px solid var(--color-border); padding-left: 0.8rem; color: var(--color-text-muted); }
 
-/* === Phase 3: 笔记锚定（角标，不高亮原文） === */
-.prose sup.note-marker {
+/* === Phase 3: 笔记锚定（角标，不高亮原文） ===
+ * 选择器不再要求 .prose 祖先 —— PDF textLayer / mammoth docx 输出都不带
+ * .prose 类，但同样要显示角标。 */
+sup.note-marker {
   color: var(--color-accent);
   font-size: 0.7em;
   font-weight: 600;
@@ -128,16 +130,22 @@ body {
   user-select: none;
   transition: background-color 0.15s ease, color 0.15s ease;
   vertical-align: super;
+  /* PDF textLayer 是 absolute 定位的 <span> 集合，sup 作为流式元素会落到
+   * textLayer 左上角（0,0）。保持 inline 让 markdown 里位置自然；PDF/DOCX
+   * 由 reader 端的父容器限定位置（textLayer 自己 overflow:hidden）。 */
+  display: inline;
+  position: relative;
+  z-index: 2;
 }
-.prose sup.note-marker:hover {
+sup.note-marker:hover {
   background: rgba(59, 130, 246, 0.28);
   color: var(--color-accent-hover);
 }
-.dark .prose sup.note-marker {
+.dark sup.note-marker {
   background: rgba(96, 165, 250, 0.18);
   color: rgb(147, 197, 253);
 }
-.dark .prose sup.note-marker:hover {
+.dark sup.note-marker:hover {
   background: rgba(96, 165, 250, 0.32);
   color: rgb(191, 219, 254);
 }

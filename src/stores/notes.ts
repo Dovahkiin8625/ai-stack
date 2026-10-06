@@ -57,6 +57,8 @@ interface NotesState {
     anchorText: string | null;
     anchorOccurrence: number;
     source?: NoteSource;
+    /** PDF 笔记用的 0-based 页码定位；markdown/DOCX 不传（保持 null）。 */
+    pageIdx?: number | null;
   }) => Promise<Note | null>;
   /**
    * 把一条已存在的笔记直接放进 store（不调后端）。
@@ -82,6 +84,8 @@ interface NotesState {
       anchorOccurrence: number;
       /** 编辑 AI 笔记时降级为用户笔记：不传则保留原 source */
       source?: NoteSource;
+      /** PDF 笔记用的 0-based 页码定位；不传则保留原 pageIdx（翻页跳转不失效）。 */
+      pageIdx?: number | null;
     },
   ) => Promise<void>;
   /**
@@ -116,7 +120,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
   togglePanel: () => set((s) => ({ panelOpen: !s.panelOpen })),
   setPanelOpen: (open) => set({ panelOpen: open }),
 
-  create: async ({ content, anchorText, anchorOccurrence, source }) => {
+  create: async ({ content, anchorText, anchorOccurrence, source, pageIdx }) => {
     const { resourceId } = get();
     if (resourceId == null) return null;
     try {
@@ -126,6 +130,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         anchorText,
         anchorOccurrence,
         source,
+        pageIdx,
       });
       set((s) => ({ notes: [...s.notes, note] }));
       return note;
@@ -151,7 +156,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
     });
   },
 
-  update: async (id, { content, anchorText, anchorOccurrence, source }) => {
+  update: async (id, { content, anchorText, anchorOccurrence, source, pageIdx }) => {
     try {
       const updated = await api.updateNote({
         id,
@@ -159,6 +164,7 @@ export const useNotesStore = create<NotesState>((set, get) => ({
         anchorText,
         anchorOccurrence,
         source,
+        pageIdx,
       });
       set((s) => ({ notes: s.notes.map((n) => (n.id === id ? updated : n)) }));
     } catch (e) {

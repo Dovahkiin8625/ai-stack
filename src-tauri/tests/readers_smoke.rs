@@ -19,18 +19,36 @@ fn fixture(name: &str) -> PathBuf {
 
 #[test]
 fn markdown_renders_to_html_and_counts_words() {
-    let (html, words) = extract(&fixture("simple.md")).unwrap();
+    let (html, words, _source) = extract(&fixture("simple.md")).unwrap();
     assert!(html.contains("<h1>Heading</h1>"), "html: {html}");
     assert!(html.contains("<strong>world</strong>"), "html: {html}");
     assert!(html.contains("<ul>"), "html: {html}");
     assert!(words >= 4, "got {words}");
 }
 
+/// 编辑模式需要把原始 markdown 文本回传给前端（textarea 显示），不能只返 html。
+/// extract 必须返回原始 source —— 即从文件读出来的字符串，与 html 无关。
+/// 之前签名只返 (html, words)，前端切到编辑模式时拿不到原文，无法实现双向绑定。
+#[test]
+fn extract_returns_source_markdown() {
+    let (_html, words, source) = extract(&fixture("simple.md")).unwrap();
+    assert_eq!(
+        source, "# Heading\n\nHello **world**.\n\n- item 1\n- item 2\n",
+        "source 必须等于 fixture 文件原文；下游编辑模式依赖这个"
+    );
+    // sanity: html 是 html、source 是 md —— 二者不能混。
+    assert!(
+        source.contains("# Heading") && !source.contains("<h1>"),
+        "source 是 markdown 原文，不应包含 html 标签"
+    );
+    assert!(words >= 4);
+}
+
 /// GFM pipe table 必须渲染成 `<table>`，而不是把 `|` `---` 当段落文本输出。
 /// 回归守卫：comrak 默认不启用 table extension，rust 后端必须显式开启。
 #[test]
 fn markdown_renders_gfm_table() {
-    let (html, _words) = extract(&fixture("with-table.md")).unwrap();
+    let (html, _words, _) = extract(&fixture("with-table.md")).unwrap();
     assert!(
         html.contains("<table>"),
         "expected <table> in html, got: {html}"
@@ -79,7 +97,7 @@ fn pptx_slide_count_is_at_least_two() {
 #[test]
 fn math_code_block_closing_fence_must_be_backticks() {
     let path = resource("01-foundations/01-mathematics/information-theory.md");
-    let (html, _) = extract(&path).unwrap();
+    let (html, _, _) = extract(&path).unwrap();
     // 修复前：h2 "六、信息论在决策树与强化学习中的应用" 被吞进 math 块
     assert!(
         html.contains("<h2>六、信息论"),
@@ -94,7 +112,7 @@ fn math_code_block_closing_fence_must_be_backticks() {
     );
     // 顺带覆盖 unsupervised-learning.md 同一类 bug
     let path2 = resource("01-foundations/03-ml-basics/unsupervised-learning.md");
-    let (html2, _) = extract(&path2).unwrap();
+    let (html2, _, _) = extract(&path2).unwrap();
     assert!(
         html2.contains("训练用 EM 算法"),
         "GMM 公式后 '训练用 EM 算法' 段落应正常出现"
@@ -127,7 +145,7 @@ fn resource(rel_path: &str) -> PathBuf {
 /// 这样 KaTeX 看到的依然是 `\mathbb{E}_\tau` 的 LaTeX 源码。
 #[test]
 fn inline_math_underscore_not_emphasized() {
-    let (html, _) = extract(&fixture("inline-math-underscore.md")).unwrap();
+    let (html, _, _) = extract(&fixture("inline-math-underscore.md")).unwrap();
     // 没有修复前：fixture 里的 $a_b$ 会被包成 $a<em>b</em>$
     assert!(
         !html.contains("<em>"),
@@ -151,7 +169,7 @@ fn inline_math_underscore_not_emphasized() {
 #[test]
 fn information_theory_line_100_formula_not_emphasized() {
     let path = resource("01-foundations/01-mathematics/information-theory.md");
-    let (html, _) = extract(&path).unwrap();
+    let (html, _, _) = extract(&path).unwrap();
     let needle = r"$\mathbb{E}<em>\tau";
     assert!(
         !html.contains(needle),
@@ -167,7 +185,7 @@ fn information_theory_line_100_formula_not_emphasized() {
 /// thin-space 命令而是字面字符，渲染塌成无空格。
 #[test]
 fn inline_math_backslash_escapes_preserved() {
-    let (html, _) = extract(&fixture("inline-math-display-escapes.md")).unwrap();
+    let (html, _, _) = extract(&fixture("inline-math-display-escapes.md")).unwrap();
     // `\!` 必须保留成反斜杠 + 叹号
     assert!(
         html.contains(r"\!"),
