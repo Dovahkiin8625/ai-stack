@@ -273,15 +273,11 @@ pub fn write_resource(
 ) -> Result<ResourceContent, String> {
     let state: tauri::State<AppState> = app.state();
     let db = Db::open(&state.db_path).map_err(|e| e.to_string())?;
-    // 复用 read_resource 的查 path + kind 逻辑：把 kind/路径 一次拿出来
-    let (category_path, rel_path, kind) = db
-        .conn
-        .query_row(
-            "SELECT category_path, rel_path, type FROM resources WHERE id = ?1",
-            [id],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
-        )
-        .map_err(|e| format!("resource {id} not found: {e}"))?;
+    // 复用 read_resource 的查 path + kind 逻辑：把 kind/路径 一次拿出来。
+    // 走 lookup_resource_path_kind 让"找不到"错误也走中文 + 操作指引路径，
+    // 否则用户编辑一篇文章时同步把它清掉，会看到英文 + 原始 rusqlite 字符串。
+    let (category_path, rel_path, kind) =
+        lookup_resource_path_kind(&db, id).map_err(|e| format!("{e:#}"))?;
     if kind != "markdown" {
         return Err(format!(
             "write_resource 仅支持 markdown 资源，resource {id} 是 {kind}"
@@ -507,7 +503,10 @@ pub fn lookup_resource_for_download(
         .map_err(|e| resource_lookup_error(e, id, true))
 }
 
-/// 资源查表错误的统一翻译：找不到行 → 告诉用户去刷新；其它 → 隐藏 SQL 细节。
+/// 资源查表错误的统一翻译：找不到行 → 告诉用户去刷新；其它 → 套一层中文前缀
+/// "读取知识库失败，请稍后重试"，再附上原始 Display —— 便于前端或后端日志排查
+/// 时能看到底层错误，但**不会**让用户第一眼看到 raw SQL（"Query returned no
+/// rows" / "database is locked" 等），也不会被错误地当成"资源不存在"提示。
 fn resource_lookup_error(e: rusqlite::Error, id: i64, for_download: bool) -> anyhow::Error {
     match e {
         rusqlite::Error::QueryReturnedNoRows => {
@@ -1875,6 +1874,10 @@ mod tests {
     /// 进 knowledge/ 的文件，没有 manifest 备份）绝对不能出现在下载队列里。
     /// 没有这条断言的话，过滤写漏只剩 `present = 0` 也会通过 —— 因为
     /// `upsert_manifest` 总是同时填 remote_hash，掩盖了过滤的真假。
+    ///
+    /// 关键：纯本地行必须 `present = 0`，否则 `present = 0` 这个 clause 也会排除它，
+    /// 测试就变成"在断言两条互不依赖的过滤"的假阳性 —— 删掉 `remote_hash` 子句
+    /// 仍然 GREEN。
     #[test]
     fn pending_rows_excludes_pure_local_rows() {
         let (_t, db) = tmp_db();
@@ -1883,7 +1886,9 @@ mod tests {
         ])
         .unwrap();
         // 纯本地行：直接 upsert_resource，不走 manifest，remote_hash = NULL。
-        // 如果过滤漏了，这条会跑到下载器去找一个不存在的远端文件。
+        // upsert_resource 强制 present=1（它表达"已扫描到本地文件"），
+        // 这里显式把 present 翻成 0 —— 表达"还没拉到本地"的纯本地占位，
+        // 让 `remote_hash IS NOT NULL` 成为唯一的排除依据。
         db.upsert_resource(crate::db::ResourceInput {
             category_path: "a".into(),
             rel_path: "local.md".into(),
@@ -1895,6 +1900,28 @@ mod tests {
             word_count: None,
         })
         .unwrap();
+        db.conn
+            .execute(
+                "UPDATE resources SET present = 0 WHERE category_path = 'a' AND rel_path = 'local.md'",
+                [],
+            )
+            .unwrap();
+        // 健全性自检：现在 local 行真的是 present=0 + remote_hash=NULL，
+        // 把 `remote_hash IS NOT NULL` 那条过滤删掉就会让 local 行通过。
+        let (present, remote_hash): (i64, Option<String>) = db
+            .conn
+            .query_row(
+                "SELECT present, remote_hash FROM resources WHERE rel_path='local.md'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(present, 0, "测试夹具必须 present=0，否则无法单独验证 remote_hash 过滤");
+        assert!(
+            remote_hash.is_none(),
+            "测试夹具必须 remote_hash=NULL（纯本地行身份）"
+        );
+
         let rows = super::pending_rows(&db).unwrap();
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].rel_path, "remote.md");
