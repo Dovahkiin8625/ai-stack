@@ -90,15 +90,19 @@ pub fn copy_seed_entries(
 }
 
 /// 桌面端老版本升级迁移：知识库原先随安装包打在 $RESOURCE/knowledge。
-/// 目标目录为空时才搬（只搬一次），搬完用户本地编辑过的文件不会被覆盖。
+/// 把 bundled 目录搬进 `dest`（首次启动后是 `app_data_dir/knowledge`）。
+///
+/// 设计要点：
+/// - **可恢复**：被中断 / 失败时下次启动继续搬 —— 源端文件已存在且大小相符就
+///   跳过；只有真缺失或大小不一致才覆盖。**绝不**用"目标非空"当门
+///   （那样一个空子目录就能卡死迁移，也意味着中断后永远续不上）。
+/// - **不重复搬**：纯本地模式（src 不存在）直接返回 0 —— 新装用户没有
+///   bundled 目录要迁，浪费 I/O 不划算。
 pub fn migrate_legacy_bundled(src: &Path, dest: &Path) -> Result<usize> {
     if !src.is_dir() {
         return Ok(0);
     }
     std::fs::create_dir_all(dest)?;
-    if std::fs::read_dir(dest)?.next().is_some() {
-        return Ok(0);
-    }
     let mut copied = 0usize;
     for entry in WalkDir::new(src) {
         let entry = match entry { Ok(e) => e, Err(_) => continue };
@@ -109,10 +113,23 @@ pub fn migrate_legacy_bundled(src: &Path, dest: &Path) -> Result<usize> {
         let target = dest.join(rel);
         if entry.file_type().is_dir() {
             std::fs::create_dir_all(&target)?;
-        } else {
-            std::fs::copy(entry.path(), &target)?;
-            copied += 1;
+            continue;
         }
+        // 与 copy_seed_entries 同款"按字节比对"的幂等规则 —— 源/目标大小一致
+        // 就视为已就位（用户也可能自己编辑过，此时大小匹配说明他们的版本与
+        // bundled 同长度，跳过即可，不强行覆盖）。
+        let src_size = match entry.metadata() {
+            Ok(m) => m.len(),
+            Err(_) => continue,
+        };
+        if std::fs::metadata(&target)
+            .map(|m| m.len() == src_size)
+            .unwrap_or(false)
+        {
+            continue;
+        }
+        std::fs::copy(entry.path(), &target)?;
+        copied += 1;
     }
     Ok(copied)
 }
@@ -122,7 +139,8 @@ pub fn migrate_legacy_bundled(src: &Path, dest: &Path) -> Result<usize> {
 #[cfg(target_os = "android")]
 pub fn materialize_seed(app: &tauri::AppHandle, root: &Path) -> Result<SeedStats> {
     use std::cell::Cell;
-    use tauri::Emitter;
+    // tauri::Manager 必须在 scope —— `app.path()` 是 Manager trait 的方法，不是 inherent。
+    use tauri::{Emitter, Manager};
     use tauri_plugin_fs::FsExt;
     let manifest_path = app
         .path()
@@ -225,6 +243,62 @@ mod tests {
         let n = migrate_legacy_bundled(&src, &dest).unwrap();
         assert_eq!(n, 1);
         assert_eq!(std::fs::read(dest.join("a/x.md")).unwrap(), b"x");
+    }
+
+    /// 模拟"上次迁移中断，只搬了一半"：dest 里有 a/x.md（与 src 同内容）
+    /// 但缺 a/y.md。再跑一次迁移应只补齐 y.md，已就位的文件不被覆盖。
+    /// 旧实现用"dest 任意非空就跳过"会把这种半成品卡死。
+    #[test]
+    fn migrate_legacy_bundled_resumes_after_partial_copy() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("old");
+        let dest = dir.path().join("new");
+        // src 准备两份文件
+        std::fs::create_dir_all(src.join("a")).unwrap();
+        std::fs::write(src.join("a/x.md"), b"x-content").unwrap();
+        std::fs::write(src.join("a/y.md"), b"y-content").unwrap();
+        // dest 模拟中断：x 已就位且大小相同，y 缺失
+        std::fs::create_dir_all(dest.join("a")).unwrap();
+        std::fs::write(dest.join("a/x.md"), b"x-content").unwrap();
+
+        let n = migrate_legacy_bundled(&src, &dest).unwrap();
+        assert_eq!(n, 1, "只补一份 y.md");
+        assert_eq!(std::fs::read(dest.join("a/x.md")).unwrap(), b"x-content");
+        assert_eq!(std::fs::read(dest.join("a/y.md")).unwrap(), b"y-content");
+
+        // 再跑一次应什么都不做 —— 全部已就位
+        let n = migrate_legacy_bundled(&src, &dest).unwrap();
+        assert_eq!(n, 0, "全部就位后再跑应零写入");
+    }
+
+    /// dest 里有一个空子目录（用户不小心建的），不能被当成"已经迁过了"卡死迁移。
+    /// 旧实现用 `read_dir(dest)?.next().is_some()` 会在这里返回 0 跳过。
+    /// 新实现按文件是否就位判断 —— 应继续迁完整棵树。
+    #[test]
+    fn migrate_legacy_bundled_ignores_stray_empty_dir_in_dest() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("old");
+        let dest = dir.path().join("new");
+        std::fs::create_dir_all(src.join("a")).unwrap();
+        std::fs::write(src.join("a/x.md"), b"x").unwrap();
+        // dest 故意留一个空的子目录
+        std::fs::create_dir_all(dest.join("orphan")).unwrap();
+
+        let n = migrate_legacy_bundled(&src, &dest).unwrap();
+        assert_eq!(n, 1, "空子目录不能阻挡迁移");
+        assert_eq!(std::fs::read(dest.join("a/x.md")).unwrap(), b"x");
+    }
+
+    /// src 不存在（典型新装场景，bundled.resources 已不再打进去）→ 直接 0，
+    /// 不创建空的 dest 浪费 I/O。
+    #[test]
+    fn migrate_legacy_bundled_noop_when_src_missing() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("does-not-exist");
+        let dest = dir.path().join("new");
+        let n = migrate_legacy_bundled(&src, &dest).unwrap();
+        assert_eq!(n, 0);
+        assert!(!dest.exists(), "src 不存在时不应创建 dest");
     }
 
     // ---- 从 commands.rs 迁来的 find_knowledge_root 测试 ----
