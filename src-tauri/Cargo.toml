@@ -28,7 +28,7 @@ anyhow = "1"
 thiserror = "1"
 
 # Phase 5: LLM 翻译
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
 
 # Phase 2 新增
 rusqlite = { version = "0.32", features = ["bundled"] }
