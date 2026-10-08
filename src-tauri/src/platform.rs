@@ -89,16 +89,29 @@ pub fn copy_seed_entries(
     Ok(stats)
 }
 
-/// 桌面端老版本升级迁移：知识库原先随安装包打在 $RESOURCE/knowledge。
+/// 桌面端老版本升级迁移：知识库原先随安装包打在 `$RESOURCE/knowledge`。
 /// 把 bundled 目录搬进 `dest`（首次启动后是 `app_data_dir/knowledge`）。
 ///
-/// 设计要点：
-/// - **可恢复**：被中断 / 失败时下次启动继续搬 —— 源端文件已存在且大小相符就
-///   跳过；只有真缺失或大小不一致才覆盖。**绝不**用"目标非空"当门
-///   （那样一个空子目录就能卡死迁移，也意味着中断后永远续不上）。
-/// - **不重复搬**：纯本地模式（src 不存在）直接返回 0 —— 新装用户没有
-///   bundled 目录要迁，浪费 I/O 不划算。
-pub fn migrate_legacy_bundled(src: &Path, dest: &Path) -> Result<usize> {
+/// 契约（**一次性，标记闸门**）：
+/// - 由 `marker`（应放在 `dest` 旁边，如 `app_data_dir/.legacy-migrated`）
+///   守门：标记已存在 → 立即返回 0，**不**走 `$RESOURCE`、**不**碰任何文件。
+///   这是为了在用户编辑过文章（长度变化）后，下次启动不会被 bundled 原版
+///   静默覆盖 —— `write_resource` 改的是 dest，不是 src；每次启动若不短路，
+///   大小一变就被覆盖，用户数据丢失。
+/// - 标记只能落在 `dest` **外面**：scanner 会 walk `dest/`（= `knowledge/`），
+///   多出来一个文件就会被当成文章 / 多出来一个目录就会被当成新分类。
+/// - 单次执行**可恢复**：迁移途中被打断（断电 / 进程崩）时，标记还没写，
+///   下次启动会再跑。同一 src/dest 第一次跑时 dest 必然不存在，所以
+///   "dest 文件存在但大小不一"只可能是"上次中断留下的半成品"，覆盖是
+///   安全的；用户在此期间不可能凭空在 dest 里编辑文件 —— 那个目录是迁移
+///   这一刻才被创建出来的。
+/// - src 不存在（新装 / bundled.resources 已移除）直接返回 0，**不**写
+///   标记 —— 让后续每次启动仍然跳过这步的"src 是否存在"判断（便宜），
+///   同时也保留未来"bundled 重新引入 → 自动触发迁移"的退路。
+pub fn migrate_legacy_bundled(src: &Path, dest: &Path, marker: &Path) -> Result<usize> {
+    if marker.exists() {
+        return Ok(0);
+    }
     if !src.is_dir() {
         return Ok(0);
     }
@@ -115,9 +128,8 @@ pub fn migrate_legacy_bundled(src: &Path, dest: &Path) -> Result<usize> {
             std::fs::create_dir_all(&target)?;
             continue;
         }
-        // 与 copy_seed_entries 同款"按字节比对"的幂等规则 —— 源/目标大小一致
-        // 就视为已就位（用户也可能自己编辑过，此时大小匹配说明他们的版本与
-        // bundled 同长度，跳过即可，不强行覆盖）。
+        // 单次执行内的"按字节比对"：第一次执行时 dest 不存在，所以任何已
+        // 存在但大小不一的 dest 文件只能是上次中断留下的半成品 —— 覆盖无副作用。
         let src_size = match entry.metadata() {
             Ok(m) => m.len(),
             Err(_) => continue,
@@ -130,6 +142,22 @@ pub fn migrate_legacy_bundled(src: &Path, dest: &Path) -> Result<usize> {
         }
         std::fs::copy(entry.path(), &target)?;
         copied += 1;
+    }
+    // 整轮 walk 跑完（没中途 `?` 失败）才写标记 —— 下次启动看标记直接短路。
+    // 用 create_new 而不是 write，避免覆盖一份可能已经记录了"上次部分完成"的旧标记。
+    if let Some(parent) = marker.parent() {
+        std::fs::create_dir_all(parent).ok();
+    }
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(marker)
+    {
+        Ok(_) => {}
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
+            // 并发启动：另一个进程抢先写了标记，认。
+        }
+        Err(e) => return Err(anyhow::anyhow!("write migration marker: {e}")),
     }
     Ok(copied)
 }
@@ -238,67 +266,129 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("old");
         let dest = dir.path().join("new");
+        let marker = dir.path().join(".legacy-migrated");
         std::fs::create_dir_all(src.join("a")).unwrap();
         std::fs::write(src.join("a/x.md"), b"x").unwrap();
-        let n = migrate_legacy_bundled(&src, &dest).unwrap();
+        let n = migrate_legacy_bundled(&src, &dest, &marker).unwrap();
         assert_eq!(n, 1);
         assert_eq!(std::fs::read(dest.join("a/x.md")).unwrap(), b"x");
+        assert!(marker.exists(), "迁移完成后必须留下标记");
     }
 
-    /// 模拟"上次迁移中断，只搬了一半"：dest 里有 a/x.md（与 src 同内容）
-    /// 但缺 a/y.md。再跑一次迁移应只补齐 y.md，已就位的文件不被覆盖。
-    /// 旧实现用"dest 任意非空就跳过"会把这种半成品卡死。
+    /// 标记守门：第一次迁移完成后用户编辑了 dest 里的文件（长度变了），
+    /// 再启动一次 —— **绝不能**因为大小不一而覆盖用户编辑。
+    /// 旧"按字节比对"的实现就是栽在这里；这里钉住标记闸门契约。
+    #[test]
+    fn migrate_legacy_bundled_does_not_overwrite_user_edits_after_marker() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("old");
+        let dest = dir.path().join("new");
+        let marker = dir.path().join(".legacy-migrated");
+        // src: 一份原始内容
+        std::fs::create_dir_all(src.join("a")).unwrap();
+        std::fs::write(src.join("a/x.md"), b"original-content").unwrap();
+
+        // 第一次跑：迁移 + 写标记
+        let first = migrate_legacy_bundled(&src, &dest, &marker).unwrap();
+        assert_eq!(first, 1);
+
+        // 用户编辑（长度变了）
+        std::fs::write(dest.join("a/x.md"), b"USER EDIT, totally different length now").unwrap();
+
+        // 模拟"下次启动"：再调一次
+        let second = migrate_legacy_bundled(&src, &dest, &marker).unwrap();
+        assert_eq!(second, 0, "标记存在时整个迁移必须短路，不应覆盖");
+        assert_eq!(
+            std::fs::read(dest.join("a/x.md")).unwrap(),
+            b"USER EDIT, totally different length now",
+            "用户编辑必须原样保留"
+        );
+    }
+
+    /// 模拟"上次迁移中断，只搬了一半"：标记还没写。再跑一次应只补齐缺失，
+    /// 已就位且大小相同的文件不被覆盖。Marker 一旦被写 —— 下一轮就完全短路。
     #[test]
     fn migrate_legacy_bundled_resumes_after_partial_copy() {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("old");
         let dest = dir.path().join("new");
+        let marker = dir.path().join(".legacy-migrated");
         // src 准备两份文件
         std::fs::create_dir_all(src.join("a")).unwrap();
         std::fs::write(src.join("a/x.md"), b"x-content").unwrap();
         std::fs::write(src.join("a/y.md"), b"y-content").unwrap();
-        // dest 模拟中断：x 已就位且大小相同，y 缺失
+        // dest 模拟"上次中断"：x 已就位且大小相同，y 缺失；marker 不在
         std::fs::create_dir_all(dest.join("a")).unwrap();
         std::fs::write(dest.join("a/x.md"), b"x-content").unwrap();
+        assert!(!marker.exists());
 
-        let n = migrate_legacy_bundled(&src, &dest).unwrap();
+        let n = migrate_legacy_bundled(&src, &dest, &marker).unwrap();
         assert_eq!(n, 1, "只补一份 y.md");
         assert_eq!(std::fs::read(dest.join("a/x.md")).unwrap(), b"x-content");
         assert_eq!(std::fs::read(dest.join("a/y.md")).unwrap(), b"y-content");
-
-        // 再跑一次应什么都不做 —— 全部已就位
-        let n = migrate_legacy_bundled(&src, &dest).unwrap();
-        assert_eq!(n, 0, "全部就位后再跑应零写入");
+        assert!(marker.exists(), "恢复跑完后也要写标记");
     }
 
     /// dest 里有一个空子目录（用户不小心建的），不能被当成"已经迁过了"卡死迁移。
-    /// 旧实现用 `read_dir(dest)?.next().is_some()` 会在这里返回 0 跳过。
     /// 新实现按文件是否就位判断 —— 应继续迁完整棵树。
     #[test]
     fn migrate_legacy_bundled_ignores_stray_empty_dir_in_dest() {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("old");
         let dest = dir.path().join("new");
+        let marker = dir.path().join(".legacy-migrated");
         std::fs::create_dir_all(src.join("a")).unwrap();
         std::fs::write(src.join("a/x.md"), b"x").unwrap();
         // dest 故意留一个空的子目录
         std::fs::create_dir_all(dest.join("orphan")).unwrap();
 
-        let n = migrate_legacy_bundled(&src, &dest).unwrap();
+        let n = migrate_legacy_bundled(&src, &dest, &marker).unwrap();
         assert_eq!(n, 1, "空子目录不能阻挡迁移");
         assert_eq!(std::fs::read(dest.join("a/x.md")).unwrap(), b"x");
     }
 
     /// src 不存在（典型新装场景，bundled.resources 已不再打进去）→ 直接 0，
-    /// 不创建空的 dest 浪费 I/O。
+    /// 不创建空的 dest 浪费 I/O，**也不**写标记 —— 保留未来"bundled 重新
+    /// 引入 → 自动触发迁移"的退路。
     #[test]
     fn migrate_legacy_bundled_noop_when_src_missing() {
         let dir = tempfile::tempdir().unwrap();
         let src = dir.path().join("does-not-exist");
         let dest = dir.path().join("new");
-        let n = migrate_legacy_bundled(&src, &dest).unwrap();
+        let marker = dir.path().join(".legacy-migrated");
+        let n = migrate_legacy_bundled(&src, &dest, &marker).unwrap();
         assert_eq!(n, 0);
         assert!(!dest.exists(), "src 不存在时不应创建 dest");
+        assert!(!marker.exists(), "src 不存在时不应写标记");
+    }
+
+    /// 用户编辑之后再写 marker → 迁移**仍**是 0（已被 marker 拦下）。
+    /// 双保险：即便 marker 真的没写，第二次 walk 也会按字节比对跳过（因为
+    /// 用户编辑后的大小恰好与 src 不同 —— 这是"用户文件"覆盖的隐藏 bug）。
+    /// 这个测试是给那条防御的最终兜底：只要 marker 写过，就绝不可能再 walk。
+    #[test]
+    fn migrate_legacy_bundled_short_circuits_on_marker_even_with_user_edits() {
+        let dir = tempfile::tempdir().unwrap();
+        let src = dir.path().join("old");
+        let dest = dir.path().join("new");
+        let marker = dir.path().join(".legacy-migrated");
+        std::fs::create_dir_all(src.join("a")).unwrap();
+        std::fs::write(src.join("a/x.md"), b"src-content").unwrap();
+
+        // 模拟"之前的迁移"：dest 已被填好（用户用 bundled 版）
+        std::fs::create_dir_all(dest.join("a")).unwrap();
+        std::fs::write(dest.join("a/x.md"), b"src-content").unwrap();
+
+        // 写好 marker
+        std::fs::write(&marker, b"").unwrap();
+
+        // 用户编辑 dest
+        std::fs::write(dest.join("a/x.md"), b"user-edit").unwrap();
+
+        // 再启动一次：marker 存在 → 短路 → 用户编辑保留
+        let n = migrate_legacy_bundled(&src, &dest, &marker).unwrap();
+        assert_eq!(n, 0);
+        assert_eq!(std::fs::read(dest.join("a/x.md")).unwrap(), b"user-edit");
     }
 
     // ---- 从 commands.rs 迁来的 find_knowledge_root 测试 ----

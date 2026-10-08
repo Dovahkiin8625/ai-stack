@@ -22,15 +22,18 @@ pub fn run() {
             let root = state.knowledge_root.clone();
 
             // 桌面端老版本升级迁移：bundled.resources 里的 knowledge/ 搬到 app_data。
-            // 解析失败（资源不存在 / 新装用户没有 bundled）直接跳过 —— migrate_legacy_bundled
-            // 内部已用 src.is_dir() 兜底，这里多一层防止 resolve 出错时 panic 阻断启动。
-            // 失败也只记日志：哪怕首次迁移中断，用户下次启动会继续搬（迁移本身可恢复）。
+            // 标记写在 app_data/.legacy-migrated（**knowledge/ 外**，否则 scanner 会把
+            // 它当成文章/分类）。标记存在 → migrate 内部短路，绝不重走 src。
+            // 这是为了不静默覆盖用户在 dest 里的本地编辑（write_resource 改的就是这里）。
             if let Ok(bundled) = app
                 .path()
                 .resolve("knowledge", tauri::path::BaseDirectory::Resource)
             {
-                if let Err(e) = platform::migrate_legacy_bundled(&bundled, &root) {
-                    eprintln!("[migrate] legacy bundled -> app_data failed: {e:#}");
+                if let Some(parent) = root.parent() {
+                    let marker = parent.join(".legacy-migrated");
+                    if let Err(e) = platform::migrate_legacy_bundled(&bundled, &root, &marker) {
+                        eprintln!("[migrate] legacy bundled -> app_data failed: {e:#}");
+                    }
                 }
             }
 
