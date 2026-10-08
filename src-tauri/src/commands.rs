@@ -1130,12 +1130,31 @@ pub async fn translate_text(payload: TranslatePayload) -> Result<String, String>
 pub fn build_state(app: &AppHandle) -> AppState {
     let db_path = resolve_db_path(app);
     let cwd = std::env::current_dir().unwrap_or_default();
-    let knowledge_root = find_knowledge_root(&cwd)
-        .unwrap_or_else(|| cwd.join("resources").join("knowledge"));
+    // 开发时从 cwd 向上找；安装后 cwd 不可靠（通常是 System32），
+    // 回落到 tauri.conf.json 的 bundle.resources 打进去的 $RESOURCE/knowledge。
+    let bundled_root = app
+        .path()
+        .resolve("knowledge", tauri::path::BaseDirectory::Resource)
+        .ok()
+        .filter(|p| p.is_dir());
+    let knowledge_root = pick_knowledge_root(
+        find_knowledge_root(&cwd),
+        bundled_root,
+        cwd.join("resources").join("knowledge"),
+    );
     AppState {
         db_path,
         knowledge_root,
     }
+}
+
+/// 知识库根目录查找优先级：开发目录 > 安装包资源目录 > 兜底路径。
+fn pick_knowledge_root(
+    dev_root: Option<PathBuf>,
+    bundled_root: Option<PathBuf>,
+    fallback: PathBuf,
+) -> PathBuf {
+    dev_root.or(bundled_root).unwrap_or(fallback)
 }
 
 /// 从 `start` 向上查找 `resources/knowledge/` 目录。
@@ -1156,9 +1175,38 @@ fn find_knowledge_root(start: &std::path::Path) -> Option<PathBuf> {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_qa_prompt, find_knowledge_root, model_supports_thinking, AiChunkPayload,
-        AiErrorPayload,
+        build_qa_prompt, find_knowledge_root, model_supports_thinking, pick_knowledge_root,
+        AiChunkPayload, AiErrorPayload,
     };
+    use std::path::PathBuf;
+
+    #[test]
+    fn pick_knowledge_root_prefers_dev_dir_over_bundled() {
+        // 开发时 cwd 向上能找到 knowledge/，应优先于安装包资源目录
+        let picked = pick_knowledge_root(
+            Some(PathBuf::from("/dev/resources/knowledge")),
+            Some(PathBuf::from("/installed/knowledge")),
+            PathBuf::from("/fallback"),
+        );
+        assert_eq!(picked, PathBuf::from("/dev/resources/knowledge"));
+    }
+
+    #[test]
+    fn pick_knowledge_root_falls_back_to_bundled_resources() {
+        // 安装后 cwd 找不到（cwd 通常是 System32），应回落到 $RESOURCE/knowledge
+        let picked = pick_knowledge_root(
+            None,
+            Some(PathBuf::from("/installed/knowledge")),
+            PathBuf::from("/fallback"),
+        );
+        assert_eq!(picked, PathBuf::from("/installed/knowledge"));
+    }
+
+    #[test]
+    fn pick_knowledge_root_uses_fallback_when_both_missing() {
+        let picked = pick_knowledge_root(None, None, PathBuf::from("/fallback/knowledge"));
+        assert_eq!(picked, PathBuf::from("/fallback/knowledge"));
+    }
 
     #[test]
     fn find_knowledge_root_walks_up_to_directory() {

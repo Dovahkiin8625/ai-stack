@@ -17,15 +17,10 @@ Windows 平台上的 AI 学习工作台。在同一个桌面应用里完成：
 - 三栏阅读：分类树 / 资源列表 / 阅读器
 - 支持 Markdown / PDF / DOCX / PPTX 四种格式
 
-### PDF 渲染前置依赖（pdfium）
+### PDF 渲染
 
-PDF 阅读器依赖 `pdfium-render` crate，需要 `pdfium.dll`：
-
-1. 从 https://github.com/nicklockwood/pdfium-binaries/releases 下载 `pdfium-windows-x64.zip`
-2. 解压得到 `pdfium.dll`
-3. 放置于 `src-tauri/resources/bin/pdfium-windows-x64/pdfium.dll`（`tauri.conf.json` 的 `bundle.resources` 已包含此路径）
-
-如果 `pdfium.dll` 缺失，PDF 阅读器自动回退到纯文本提取（`pdf-extract` crate）。
+PDF 页面渲染由前端 `pdf.js`（`pdfjs-dist`）承担，无 native 依赖；
+后端 `pdf-extract` 只负责数页和文本提取。
 
 ## 技术栈
 
