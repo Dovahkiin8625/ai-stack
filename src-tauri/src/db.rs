@@ -22,6 +22,10 @@ pub struct ResourceRow {
     pub indexed_at: String,
     pub page_count: Option<i64>,
     pub word_count: Option<i64>,
+    /// 文件是否已在本地 knowledge/ 目录里。manifest 有但没下过的条目为 false。
+    pub present: bool,
+    /// 非 NULL = 该行由 manifest 管理，scanner 的 delete_missing_resources 不得删它。
+    pub remote_hash: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -40,6 +44,26 @@ pub struct ResourceInput {
 
 pub struct Db {
     pub conn: rusqlite::Connection,
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct SyncStatus {
+    pub total: i64,
+    pub present: i64,
+    pub total_bytes: i64,
+    pub cached_bytes: i64,
+}
+
+/// manifest 条目的标题 = 文件名去扩展名（与 scanner 的 stem 规则一致）。
+fn title_from_file_name(rel_path: &str) -> String {
+    rel_path
+        .rsplit('/')
+        .next()
+        .unwrap_or(rel_path)
+        .rsplit_once('.')
+        .map(|(stem, _)| stem)
+        .unwrap_or(rel_path)
+        .to_string()
 }
 
 #[derive(Debug, Clone)]
@@ -168,9 +192,54 @@ impl Db {
         if has_page_idx == 0 {
             tx.execute("ALTER TABLE notes ADD COLUMN page_idx INTEGER", [])?;
         }
+        // v2 增量：resources 加 present / remote_hash 两列。
+        // - remote_hash：非 NULL 表示该行由 manifest 管理；为 NULL 是纯本地行。
+        //   scanner 的 delete_missing_resources 必须跳过 remote_hash IS NOT NULL 的行，
+        //   否则 manifest 里还没下完的条目会被当成"文件被删了"误清掉。
+        // - present：是否本地已有文件。manifest 占位行默认 0；本地文件 upsert 后置 1；
+        //   老库 ALTER 默认 1，因为旧库里的每一行都是已经躺在磁盘上的本地文件。
+        let has_remote_hash: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('resources') WHERE name='remote_hash'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_remote_hash == 0 {
+            tx.execute("ALTER TABLE resources ADD COLUMN remote_hash TEXT", [])?;
+        }
+        let has_present: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('resources') WHERE name='present'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_present == 0 {
+            // 默认 1：老库里的每一行都是已经躺在磁盘上的本地文件。
+            tx.execute("ALTER TABLE resources ADD COLUMN present INTEGER NOT NULL DEFAULT 1", [])?;
+        }
+        // v2 新表：index_files 与 app_config。
+        // `_index.md` 不进 resources（scanner 刻意跳过），单独一张小表记录远端大小，
+        // 供 read_subcategory_index 在文件缺失时按需下载。
+        tx.execute_batch(
+            "CREATE TABLE IF NOT EXISTS index_files (
+                path TEXT PRIMARY KEY,
+                size INTEGER NOT NULL,
+                present INTEGER NOT NULL DEFAULT 0
+             );
+             CREATE TABLE IF NOT EXISTS app_config (
+                key TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+             );",
+        )?;
         let now = chrono::Utc::now().to_rfc3339();
         tx.execute(
             "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (1, ?1)",
+            params![now],
+        )?;
+        tx.execute(
+            "INSERT OR IGNORE INTO schema_version (version, applied_at) VALUES (2, ?1)",
             params![now],
         )?;
         tx.commit()?;
@@ -200,8 +269,9 @@ impl Db {
         let now = chrono::Utc::now().to_rfc3339();
         self.conn.execute(
             "INSERT INTO resources (category_path, rel_path, type, title,
-                                    size_bytes, mtime, indexed_at, page_count, word_count)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+                                    size_bytes, mtime, indexed_at, page_count, word_count,
+                                    present)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, 1)
              ON CONFLICT(category_path, rel_path) DO UPDATE SET
                 type = excluded.type,
                 title = excluded.title,
@@ -209,7 +279,8 @@ impl Db {
                 mtime = excluded.mtime,
                 indexed_at = excluded.indexed_at,
                 page_count = excluded.page_count,
-                word_count = excluded.word_count",
+                word_count = excluded.word_count,
+                present = 1",
             params![
                 r.category_path,
                 r.rel_path,
@@ -271,7 +342,7 @@ impl Db {
     pub fn list_resources(&self, category_path: &str) -> Result<Vec<ResourceRow>> {
         let mut stmt = self.conn.prepare(
             "SELECT id, category_path, rel_path, type, title,
-                    size_bytes, indexed_at, page_count, word_count
+                    size_bytes, indexed_at, page_count, word_count, present, remote_hash
              FROM resources WHERE category_path = ?1
              ORDER BY rel_path",
         )?;
@@ -287,6 +358,8 @@ impl Db {
                     indexed_at: row.get(6)?,
                     page_count: row.get(7)?,
                     word_count: row.get(8)?,
+                    present: row.get::<_, i64>(9)? != 0,
+                    remote_hash: row.get(10)?,
                 })
             })?
             .collect::<rusqlite::Result<Vec<_>>>()?;
@@ -298,9 +371,12 @@ impl Db {
         category_path: &str,
         keep: &[String],
     ) -> Result<usize> {
-        // 取出该分类下所有 rel_path，差集删除
+        // 取出该分类下所有 rel_path，差集删除。
+        // 但必须排除 remote_hash IS NOT NULL 的行 —— 那些是 manifest 占位行，
+        // 文件还没下载完是预期状态，不能被当成"用户删了"清掉。
         let mut stmt = self.conn.prepare(
-            "SELECT rel_path FROM resources WHERE category_path = ?1",
+            "SELECT rel_path FROM resources
+             WHERE category_path = ?1 AND remote_hash IS NULL",
         )?;
         let existing: Vec<String> = stmt
             .query_map([category_path], |row| row.get::<_, String>(0))?
@@ -312,7 +388,7 @@ impl Db {
         let mut removed = 0;
         for p in to_delete {
             removed += self.conn.execute(
-                "DELETE FROM resources WHERE category_path = ?1 AND rel_path = ?2",
+                "DELETE FROM resources WHERE category_path = ?1 AND rel_path = ?2 AND remote_hash IS NULL",
                 params![category_path, p],
             )?;
         }
@@ -458,6 +534,159 @@ impl Db {
         Ok(())
     }
 
+    /// manifest 条目 upsert 为占位行（present=0）。分类链按顶层到叶子顺序补齐，
+    /// 满足 resources.category_path → categories.path 的外键。
+    pub fn upsert_manifest(&self, files: &[crate::sync::ManifestFile]) -> Result<()> {
+        let now = chrono::Utc::now().to_rfc3339();
+        for f in files {
+            let Some((category_path, rel_path)) = crate::sync::split_category(&f.path) else {
+                continue;
+            };
+            self.ensure_category_chain(&category_path)?;
+            let title = title_from_file_name(&rel_path);
+            let Some(r#type) = crate::scanner::classify_type(
+                rel_path.rsplit('.').next().unwrap_or(""),
+            ) else {
+                continue; // 未知扩展名不进资源列表
+            };
+            // sha256 缺失 → 空串占位，仍然标记行为 manifest 管理；不能让 remote_hash 为 NULL，
+            // 否则 scanner 的 delete_missing_resources 会把还没下完的远端条目误删。
+            let remote_hash = f.sha256.as_deref().unwrap_or("");
+            self.conn.execute(
+                "INSERT INTO resources (category_path, rel_path, type, title, size_bytes,
+                                        mtime, indexed_at, page_count, word_count,
+                                        remote_hash, present)
+                 VALUES (?1, ?2, ?3, ?4, ?5, 0, ?6, NULL, NULL, ?7, 0)
+                 ON CONFLICT(category_path, rel_path) DO UPDATE SET
+                    size_bytes = excluded.size_bytes,
+                    remote_hash = excluded.remote_hash,
+                    indexed_at = excluded.indexed_at",
+                params![category_path, rel_path, r#type, title, f.size as i64, now, remote_hash],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// 把 category_path 解析成顶层到叶子的祖先链，逐级 upsert 到 categories 表。
+    /// 必须在插入 resources 行之前调用 —— resources.category_path 是 categories(path) 的外键。
+    pub fn ensure_category_chain(&self, category_path: &str) -> Result<()> {
+        let segs: Vec<&str> = category_path.split('/').collect();
+        for i in 1..=segs.len() {
+            let path = segs[..i].join("/");
+            let parent = if i == 1 { None } else { Some(segs[..i - 1].join("/")) };
+            let title = crate::scanner::humanize_dir_name(&path);
+            let order = crate::scanner::parse_sort_order(&path) as i64;
+            self.conn.execute(
+                "INSERT INTO categories (path, parent_path, title, sort_order)
+                 VALUES (?1, ?2, ?3, ?4)
+                 ON CONFLICT(path) DO UPDATE SET
+                    parent_path = excluded.parent_path",
+                params![path, parent, title, order],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// 把 manifest 占位行翻转为 present=1（文件已下载到本地）。
+    /// 不动 remote_hash —— 行仍归 manifest 管理，防止后续 scanner 误删。
+    pub fn mark_resource_present(&self, category_path: &str, rel_path: &str) -> Result<()> {
+        self.conn.execute(
+            "UPDATE resources SET present = 1 WHERE category_path = ?1 AND rel_path = ?2",
+            params![category_path, rel_path],
+        )?;
+        Ok(())
+    }
+
+    /// 删除 manifest 里已经没有的远端条目。
+    /// 只动 remote_hash IS NOT NULL 的行 —— 纯本地行（remote_hash IS NULL）永远不动。
+    pub fn drop_resources_absent_from_manifest(&self, keep: &[(String, String)]) -> Result<usize> {
+        let mut stmt = self.conn.prepare("SELECT category_path, rel_path FROM resources WHERE remote_hash IS NOT NULL")?;
+        let all: Vec<(String, String)> = stmt
+            .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))?
+            .collect::<rusqlite::Result<Vec<_>>>()?;
+        let mut removed = 0;
+        for (cat, rel) in all {
+            if keep.contains(&(cat.clone(), rel.clone())) {
+                continue;
+            }
+            removed += self.conn.execute(
+                "DELETE FROM resources WHERE category_path = ?1 AND rel_path = ?2",
+                params![cat, rel],
+            )?;
+        }
+        Ok(removed)
+    }
+
+    /// `_index.md` 不进 resources（scanner 跳过），单独 upsert 到 index_files：
+    /// - size = manifest 上的字节数，供 read_subcategory_index 缺文件时按需下载。
+    /// - present = 0（默认），下载/扫描到本地后由 mark_index_present 翻 1。
+    pub fn upsert_index_files(&self, files: &[crate::sync::ManifestFile]) -> Result<()> {
+        for f in files {
+            self.conn.execute(
+                "INSERT INTO index_files (path, size, present) VALUES (?1, ?2, 0)
+                 ON CONFLICT(path) DO UPDATE SET size = excluded.size",
+                params![f.path, f.size as i64],
+            )?;
+        }
+        Ok(())
+    }
+
+    /// 查 index_files：返 Some((size, present)) 或 None（未在 manifest 中）。
+    pub fn index_file(&self, path: &str) -> Result<Option<(u64, bool)>> {
+        let mut stmt = self.conn.prepare("SELECT size, present FROM index_files WHERE path = ?1")?;
+        let mut rows = stmt.query([path])?;
+        match rows.next()? {
+            Some(r) => Ok(Some((r.get::<_, i64>(0)? as u64, r.get::<_, i64>(1)? != 0))),
+            None => Ok(None),
+        }
+    }
+
+    /// `_index.md` 已下载到本地 → 翻 present=1。
+    pub fn mark_index_present(&self, path: &str) -> Result<()> {
+        self.conn.execute("UPDATE index_files SET present = 1 WHERE path = ?1", [path])?;
+        Ok(())
+    }
+
+    /// 同步状态面板用的统计：只算 manifest 管理的行（remote_hash IS NOT NULL），
+    /// 纯本地行不计入 total（但本地行扫描后会得到 present=1，本任务范畴外后续任务处理）。
+    pub fn sync_status(&self) -> Result<SyncStatus> {
+        let mut stmt = self.conn.prepare(
+            "SELECT COUNT(*),
+                    COALESCE(SUM(present), 0),
+                    COALESCE(SUM(size_bytes), 0),
+                    COALESCE(SUM(CASE WHEN present = 1 THEN size_bytes ELSE 0 END), 0)
+             FROM resources WHERE remote_hash IS NOT NULL",
+        )?;
+        let mut rows = stmt.query([])?;
+        let row = rows.next()?.expect("aggregate always yields one row");
+        Ok(SyncStatus {
+            total: row.get(0)?,
+            present: row.get(1)?,
+            total_bytes: row.get(2)?,
+            cached_bytes: row.get(3)?,
+        })
+    }
+
+    /// 读 app_config 单条配置。返 None = 未设置。
+    pub fn get_config(&self, key: &str) -> Result<Option<String>> {
+        let mut stmt = self.conn.prepare("SELECT value FROM app_config WHERE key = ?1")?;
+        let mut rows = stmt.query([key])?;
+        match rows.next()? {
+            Some(r) => Ok(Some(r.get(0)?)),
+            None => Ok(None),
+        }
+    }
+
+    /// upsert 一条 app_config（key 不存在则插入，存在则更新 value）。
+    pub fn set_config(&self, key: &str, value: &str) -> Result<()> {
+        self.conn.execute(
+            "INSERT INTO app_config (key, value) VALUES (?1, ?2)
+             ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            params![key, value],
+        )?;
+        Ok(())
+    }
+
     fn get_note(&self, id: i64) -> Result<NoteRow> {
         let row = self
             .conn
@@ -483,5 +712,182 @@ impl Db {
             )
             .with_context(|| format!("note {id} not found"))?;
         Ok(row)
+    }
+}
+
+#[cfg(test)]
+mod manifest_tests {
+    use super::*;
+    use crate::sync::ManifestFile;
+
+    fn opened() -> (tempfile::TempDir, Db) {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut db = Db::open(&tmp.path().join("t.db")).unwrap();
+        db.migrate().unwrap();
+        (tmp, db)
+    }
+
+    fn file(path: &str, size: u64) -> ManifestFile {
+        ManifestFile { path: path.into(), size, sha256: None }
+    }
+
+    #[test]
+    fn migrate_adds_present_and_remote_hash_columns() {
+        let (_t, db) = opened();
+        let cols: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('resources') WHERE name IN ('present','remote_hash')",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(cols, 2);
+        // 新表也在
+        db.conn
+            .query_row("SELECT COUNT(*) FROM index_files", [], |r| r.get::<_, i64>(0))
+            .unwrap();
+    }
+
+    #[test]
+    fn upsert_manifest_creates_placeholder_rows_not_present() {
+        let (_t, db) = opened();
+        db.upsert_manifest(&[file("01-基础/回归.md", 500)]).unwrap();
+        let (present, size, hash): (i64, i64, Option<String>) = db
+            .conn
+            .query_row(
+                "SELECT present, size_bytes, remote_hash FROM resources WHERE rel_path = '回归.md'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+            )
+            .unwrap();
+        assert_eq!(present, 0);
+        assert_eq!(size, 500);
+        // Brief originally asserted hash.is_none(), but the broader design intent
+        // (manifest rows must stay managed = remote_hash IS NOT NULL) requires
+        // upsert_manifest to write a non-NULL sentinel when sha256 is absent.
+        // See commit report for deviation note.
+        assert!(hash.is_some());
+        // 分类被自动补齐（FK 要求）
+        let n: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM categories WHERE path='01-基础'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn upsert_manifest_is_idempotent() {
+        let (_t, db) = opened();
+        db.upsert_manifest(&[file("01-基础/回归.md", 500)]).unwrap();
+        db.upsert_manifest(&[file("01-基础/回归.md", 500)]).unwrap();
+        let n: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM resources", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn scan_local_file_flips_present_to_one() {
+        let (_t, db) = opened();
+        db.upsert_manifest(&[file("01-基础/回归.md", 500)]).unwrap();
+        db.upsert_resource(ResourceInput {
+            category_path: "01-基础".into(),
+            rel_path: "回归.md".into(),
+            r#type: "markdown".into(),
+            title: "回归".into(),
+            size_bytes: 500,
+            mtime: 0,
+            page_count: None,
+            word_count: None,
+        })
+        .unwrap();
+        let present: i64 = db
+            .conn
+            .query_row("SELECT present FROM resources WHERE rel_path='回归.md'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(present, 1);
+        // remote_hash 保留 —— 决定这条不再被 scan 的 delete_missing_resources 误删
+        let still_managed: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM resources WHERE remote_hash IS NOT NULL",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(still_managed, 1);
+    }
+
+    #[test]
+    fn delete_missing_resources_keeps_manifest_managed_rows() {
+        let (_t, db) = opened();
+        db.upsert_manifest(&[file("01-基础/远端.md", 10), file("01-基础/本地.md", 10)]).unwrap();
+        // 本地.md 被 scanner 扫到（present=1），远端.md 只有 manifest 占位（present=0）
+        db.upsert_resource(ResourceInput {
+            category_path: "01-基础".into(),
+            rel_path: "本地.md".into(),
+            r#type: "markdown".into(),
+            title: "本地".into(),
+            size_bytes: 10,
+            mtime: 0,
+            page_count: None,
+            word_count: None,
+        })
+        .unwrap();
+        // scanner 只 keep 了 本地.md；远端.md 虽没扫到也必须留下
+        db.delete_missing_resources("01-基础", &["本地.md".to_string()]).unwrap();
+        let n: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM resources WHERE rel_path='远端.md'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 1);
+    }
+
+    #[test]
+    fn drop_resources_absent_from_manifest_removes_stale() {
+        let (_t, db) = opened();
+        db.upsert_manifest(&[file("01-基础/旧.md", 10), file("01-基础/新.md", 10)]).unwrap();
+        db.drop_resources_absent_from_manifest(&[("01-基础".into(), "新.md".into())])
+            .unwrap();
+        let n: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM resources WHERE rel_path='旧.md'", [], |r| r.get(0))
+            .unwrap();
+        assert_eq!(n, 0);
+    }
+
+    #[test]
+    fn index_files_roundtrip() {
+        let (_t, db) = opened();
+        db.upsert_index_files(&[file("01-基础/_index.md", 42)]).unwrap();
+        assert_eq!(db.index_file("01-基础/_index.md").unwrap(), Some((42, false)));
+        db.mark_index_present("01-基础/_index.md").unwrap();
+        assert_eq!(db.index_file("01-基础/_index.md").unwrap(), Some((42, true)));
+        assert_eq!(db.index_file("不存在/_index.md").unwrap(), None);
+    }
+
+    #[test]
+    fn sync_status_counts_present_and_bytes() {
+        let (_t, db) = opened();
+        db.upsert_manifest(&[file("a/x.md", 100), file("a/y.md", 200)]).unwrap();
+        db.mark_resource_present("a", "x.md").unwrap();
+        let st = db.sync_status().unwrap();
+        assert_eq!(st.total, 2);
+        assert_eq!(st.present, 1);
+        assert_eq!(st.total_bytes, 300);
+        assert_eq!(st.cached_bytes, 100);
+    }
+
+    #[test]
+    fn config_roundtrip() {
+        let (_t, db) = opened();
+        assert_eq!(db.get_config("sync_base_url").unwrap(), None);
+        db.set_config("sync_base_url", "https://example.com/kb").unwrap();
+        assert_eq!(
+            db.get_config("sync_base_url").unwrap().as_deref(),
+            Some("https://example.com/kb")
+        );
     }
 }
