@@ -222,18 +222,7 @@ pub async fn read_resource(id: i64, app: AppHandle) -> Result<ResourceContent, S
     std::thread::spawn(move || {
         let result = (|| -> anyhow::Result<ResourceContent> {
             let db = Db::open(&db_path).context("open db")?;
-            let (category_path, rel_path, kind) = db
-                .conn
-                .query_row(
-                    "SELECT category_path, rel_path, type FROM resources WHERE id = ?1",
-                    [id],
-                    |r| Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, String>(2)?,
-                    )),
-                )
-                .with_context(|| format!("resource {id} not found"))?;
+            let (category_path, rel_path, kind) = lookup_resource_path_kind(&db, id)?;
             let local_state = AppState {
                 db_path: db_path.clone(),
                 knowledge_root: knowledge_root.clone(),
@@ -329,18 +318,7 @@ pub async fn read_resource_bytes(id: i64, app: AppHandle) -> Result<Vec<u8>, Str
     std::thread::spawn(move || {
         let result = (|| -> anyhow::Result<Vec<u8>> {
             let db = Db::open(&db_path).context("open db")?;
-            let (category_path, rel_path, kind) = db
-                .conn
-                .query_row(
-                    "SELECT category_path, rel_path, type FROM resources WHERE id = ?1",
-                    [id],
-                    |r| Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, String>(2)?,
-                    )),
-                )
-                .with_context(|| format!("resource {id} not found"))?;
+            let (category_path, rel_path, kind) = lookup_resource_path_kind(&db, id)?;
             if !matches!(kind.as_str(), "pdf" | "docx" | "pptx") {
                 anyhow::bail!("read_resource_bytes 仅支持 PDF/DOCX/PPTX，resource {id} 是 {kind}");
             }
@@ -488,6 +466,63 @@ pub fn apply_manifest(db: &Db, knowledge_root: &Path, manifest: &Manifest) -> Re
         }
     }
     Ok(())
+}
+
+/// DB 查 资源的 (目录路径, 文件名, 类型)，找不到时返回**用户可读**的中文错误，
+/// 不把 `rusqlite::Error::QueryReturnedNoRows` 的 `"Query returned no rows"` 原文
+/// 透出到 UI —— 那是 RULING D 明令禁止的内部 jargon。
+///
+/// 抽出这个 helper 是为了：
+/// 1. 三处调用（read_resource / read_resource_bytes / download_resource）共享
+///    一份错误文案，避免日后再出现"某条路径漏改"的回归。
+/// 2. 单测可以裸用 `&Db` 直接断言错误文本，不依赖 AppHandle。
+pub fn lookup_resource_path_kind(
+    db: &Db,
+    id: i64,
+) -> Result<(String, String, String)> {
+    db.conn
+        .query_row(
+            "SELECT category_path, rel_path, type FROM resources WHERE id = ?1",
+            [id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
+        )
+        .map_err(|e| resource_lookup_error(e, id, false))
+}
+
+/// 同上，但 select 的是 size_bytes（供 download_resource 走 HTTP 时用）。
+pub fn lookup_resource_for_download(
+    db: &Db,
+    id: i64,
+) -> Result<(String, String, i64)> {
+    db.conn
+        .query_row(
+            "SELECT category_path, rel_path, size_bytes FROM resources WHERE id = ?1",
+            [id],
+            |r| Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+            )),
+        )
+        .map_err(|e| resource_lookup_error(e, id, true))
+}
+
+/// 资源查表错误的统一翻译：找不到行 → 告诉用户去刷新；其它 → 隐藏 SQL 细节。
+fn resource_lookup_error(e: rusqlite::Error, id: i64, for_download: bool) -> anyhow::Error {
+    match e {
+        rusqlite::Error::QueryReturnedNoRows => {
+            if for_download {
+                anyhow::anyhow!(
+                    "文章 id={id} 已不在知识库中（可能同步时被清掉），无法下载 —— 请返回列表刷新"
+                )
+            } else {
+                anyhow::anyhow!(
+                    "文章 id={id} 已不在知识库中（可能同步时被清掉），请返回列表刷新"
+                )
+            }
+        }
+        other => anyhow::anyhow!("读取知识库失败，请稍后重试：{other}"),
+    }
 }
 
 /// `_index.md` 按需下载 —— 与 resources 共用 ensure_local_at，但 index_files 没有
@@ -688,18 +723,7 @@ pub async fn download_resource(id: i64, app: AppHandle) -> Result<(), String> {
     std::thread::spawn(move || {
         let result = (|| -> anyhow::Result<()> {
             let db = Db::open(&db_path)?;
-            let (cat, rel, size) = db
-                .conn
-                .query_row(
-                    "SELECT category_path, rel_path, size_bytes FROM resources WHERE id = ?1",
-                    [id],
-                    |r| Ok((
-                        r.get::<_, String>(0)?,
-                        r.get::<_, String>(1)?,
-                        r.get::<_, i64>(2)?,
-                    )),
-                )
-                .with_context(|| format!("resource {id} not found"))?;
+            let (cat, rel, size) = lookup_resource_for_download(&db, id)?;
             let base_url = db
                 .get_config("sync_base_url")?
                 .unwrap_or_default();
@@ -1847,6 +1871,35 @@ mod tests {
         assert_eq!(rows[0].size, 20);
     }
 
+    /// `remote_hash IS NOT NULL` 是 pending_rows 的硬过滤：纯本地行（开发者手动扔
+    /// 进 knowledge/ 的文件，没有 manifest 备份）绝对不能出现在下载队列里。
+    /// 没有这条断言的话，过滤写漏只剩 `present = 0` 也会通过 —— 因为
+    /// `upsert_manifest` 总是同时填 remote_hash，掩盖了过滤的真假。
+    #[test]
+    fn pending_rows_excludes_pure_local_rows() {
+        let (_t, db) = tmp_db();
+        db.upsert_manifest(&[
+            ManifestFile { path: "a/remote.md".into(), size: 10, sha256: None },
+        ])
+        .unwrap();
+        // 纯本地行：直接 upsert_resource，不走 manifest，remote_hash = NULL。
+        // 如果过滤漏了，这条会跑到下载器去找一个不存在的远端文件。
+        db.upsert_resource(crate::db::ResourceInput {
+            category_path: "a".into(),
+            rel_path: "local.md".into(),
+            r#type: "markdown".into(),
+            title: "local".into(),
+            size_bytes: 5,
+            mtime: 0,
+            page_count: None,
+            word_count: None,
+        })
+        .unwrap();
+        let rows = super::pending_rows(&db).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].rel_path, "remote.md");
+    }
+
     #[test]
     fn apply_manifest_marks_downloaded_files_present() {
         let (tmp, db) = tmp_db();
@@ -1881,5 +1934,41 @@ mod tests {
         let msg = format!("{err:#}");
         assert!(msg.contains("尚未缓存"), "实际信息：{msg}");
         assert!(msg.contains("同步地址"), "应告诉用户去哪里配置：{msg}");
+    }
+
+    /// Review Focus #1 的姊妹分支：文章已被 manifest 清掉（典型场景 —— 同步运行把
+    /// 行 drop 掉，但前端的列表是上一次 scan 的快照，用户点了已不存在的条目）。
+    /// 错误必须是中文 + 可操作，**绝不能**透出 rusqlite 的 "Query returned no rows"。
+    #[test]
+    fn lookup_resource_path_kind_missing_id_gives_actionable_chinese_error() {
+        let (_t, db) = tmp_db();
+        let err = super::lookup_resource_path_kind(&db, 9999).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("已不在知识库中"),
+            "实际信息：{msg}"
+        );
+        assert!(
+            msg.contains("返回列表刷新"),
+            "应告诉用户去哪里操作：{msg}"
+        );
+        assert!(
+            !msg.contains("Query returned no rows"),
+            "绝不能把 rusqlite 内部错误原文透出来：{msg}"
+        );
+    }
+
+    /// download_resource 的「找不到」分支：消息措辞要带"无法下载"以匹配上下文，
+    /// 但同样不能透出 rusqlite 原文。
+    #[test]
+    fn lookup_resource_for_download_missing_id_gives_actionable_chinese_error() {
+        let (_t, db) = tmp_db();
+        let err = super::lookup_resource_for_download(&db, 9999).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("无法下载"), "实际信息：{msg}");
+        assert!(
+            !msg.contains("Query returned no rows"),
+            "绝不能把 rusqlite 内部错误原文透出来：{msg}"
+        );
     }
 }
