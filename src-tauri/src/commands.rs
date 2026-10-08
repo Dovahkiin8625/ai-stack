@@ -1634,17 +1634,19 @@ pub fn build_state(app: &AppHandle) -> AppState {
     let db_path = resolve_db_path(app);
     let cwd = std::env::current_dir().unwrap_or_default();
     // 开发时从 cwd 向上找；安装后 cwd 不可靠（通常是 System32），
-    // 回落到 tauri.conf.json 的 bundle.resources 打进去的 $RESOURCE/knowledge。
-    let bundled_root = app
+    // 回落到 app_data_dir/knowledge（旧版本曾用 $RESOURCE/knowledge，
+    // 知识库不再打进安装包后该分支随之删除 —— 见 platform::pick_knowledge_root）。
+    let mut app_data = app
         .path()
-        .resolve("knowledge", tauri::path::BaseDirectory::Resource)
-        .ok()
-        .filter(|p| p.is_dir());
-    let knowledge_root = pick_knowledge_root(
-        find_knowledge_root(&cwd),
-        bundled_root,
-        cwd.join("resources").join("knowledge"),
+        .app_data_dir()
+        .expect("app_data_dir resolvable");
+    app_data.push("knowledge");
+    let knowledge_root = crate::platform::pick_knowledge_root(
+        crate::platform::find_knowledge_root(&cwd),
+        app_data,
     );
+    // 与 build_state 的 brief 对齐：保证扫描器 / materialize_seed 启动时目录一定存在
+    std::fs::create_dir_all(&knowledge_root).ok();
     // setup() 钩子在主线程上、Tauri 的 tokio runtime 启动之前同步执行 —— 这是构造
     // HttpFetcher 的唯一安全时机（构造后共享给所有需要下载的命令）。失败仅记录日志，
     // 让用户仍能在纯本地模式下使用 app（无 sync_base_url 时本来也用不上）。
@@ -1662,87 +1664,13 @@ pub fn build_state(app: &AppHandle) -> AppState {
     }
 }
 
-/// 知识库根目录查找优先级：开发目录 > 安装包资源目录 > 兜底路径。
-fn pick_knowledge_root(
-    dev_root: Option<PathBuf>,
-    bundled_root: Option<PathBuf>,
-    fallback: PathBuf,
-) -> PathBuf {
-    dev_root.or(bundled_root).unwrap_or(fallback)
-}
-
-/// 从 `start` 向上查找 `resources/knowledge/` 目录。
-/// 解决 `cargo run`（cwd 在 src-tauri/）与 `tauri build`（cwd 在项目根）
-/// 工作目录不一致的问题。
-fn find_knowledge_root(start: &std::path::Path) -> Option<PathBuf> {
-    let mut cur: Option<&std::path::Path> = Some(start);
-    while let Some(p) = cur {
-        let candidate = p.join("resources").join("knowledge");
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-        cur = p.parent();
-    }
-    None
-}
-
 #[cfg(test)]
 mod tests {
     use super::{
-        build_qa_prompt, find_knowledge_root, model_supports_thinking, pick_knowledge_root,
-        AiChunkPayload, AiErrorPayload, AppState,
+        build_qa_prompt, model_supports_thinking, AiChunkPayload, AiErrorPayload, AppState,
     };
     use crate::db::Db;
     use crate::sync::{Manifest, ManifestFile};
-    use std::path::PathBuf;
-
-    #[test]
-    fn pick_knowledge_root_prefers_dev_dir_over_bundled() {
-        // 开发时 cwd 向上能找到 knowledge/，应优先于安装包资源目录
-        let picked = pick_knowledge_root(
-            Some(PathBuf::from("/dev/resources/knowledge")),
-            Some(PathBuf::from("/installed/knowledge")),
-            PathBuf::from("/fallback"),
-        );
-        assert_eq!(picked, PathBuf::from("/dev/resources/knowledge"));
-    }
-
-    #[test]
-    fn pick_knowledge_root_falls_back_to_bundled_resources() {
-        // 安装后 cwd 找不到（cwd 通常是 System32），应回落到 $RESOURCE/knowledge
-        let picked = pick_knowledge_root(
-            None,
-            Some(PathBuf::from("/installed/knowledge")),
-            PathBuf::from("/fallback"),
-        );
-        assert_eq!(picked, PathBuf::from("/installed/knowledge"));
-    }
-
-    #[test]
-    fn pick_knowledge_root_uses_fallback_when_both_missing() {
-        let picked = pick_knowledge_root(None, None, PathBuf::from("/fallback/knowledge"));
-        assert_eq!(picked, PathBuf::from("/fallback/knowledge"));
-    }
-
-    #[test]
-    fn find_knowledge_root_walks_up_to_directory() {
-        // 在 tmp 下构造 project_root/src-tauri/，把 project_root/resources/knowledge/ 建出来
-        let tmp = tempfile::tempdir().unwrap();
-        let project_root = tmp.path();
-        let deep = project_root.join("src-tauri");
-        std::fs::create_dir_all(&deep).unwrap();
-        let knowledge = project_root.join("resources").join("knowledge");
-        std::fs::create_dir_all(&knowledge).unwrap();
-        // 从 src-tauri（cwd）开始查找，应向上找到 project_root/resources/knowledge
-        let found = find_knowledge_root(&deep).unwrap();
-        assert_eq!(found.canonicalize().unwrap(), knowledge.canonicalize().unwrap());
-    }
-
-    #[test]
-    fn find_knowledge_root_returns_none_when_missing() {
-        let tmp = tempfile::tempdir().unwrap();
-        assert!(find_knowledge_root(tmp.path()).is_none());
-    }
 
     #[test]
     fn model_supports_thinking_only_for_claude_prefix() {

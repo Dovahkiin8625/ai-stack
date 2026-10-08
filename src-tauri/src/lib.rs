@@ -4,6 +4,7 @@ pub mod scanner;
 pub mod reader;
 pub mod commands;
 pub mod readers;
+pub mod platform;
 
 use tauri::Manager;
 
@@ -17,7 +18,13 @@ pub fn run() {
         .plugin(tauri_plugin_sql::Builder::default().build())
         .setup(|app| {
             // AppState 只持有不可变路径；不可在 commands::build_state 之后再修改
-            app.manage(commands::build_state(app.handle()));
+            let state = commands::build_state(app.handle());
+            let root = state.knowledge_root.clone();
+            // 种子库只在 Android 有意义；失败不阻断启动（远端同步仍可补齐）
+            if let Err(e) = platform::materialize_seed(app.handle(), &root) {
+                eprintln!("[seed] materialize failed: {e:#}");
+            }
+            app.manage(state);
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
