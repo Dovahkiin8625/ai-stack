@@ -597,6 +597,16 @@ impl Db {
         Ok(())
     }
 
+    /// 按 resource id 把 present 翻 1。不存在 → 静默 no-op（与「不抛错保持幂等」一致）。
+    /// download_resource 命令在按 id 查表后直接调用，避免再走一次 (category_path, rel_path)。
+    pub fn mark_resource_present_unchecked(&self, id: i64) -> Result<()> {
+        self.conn.execute(
+            "UPDATE resources SET present = 1 WHERE id = ?1",
+            [id],
+        )?;
+        Ok(())
+    }
+
     /// 删除 manifest 里已经没有的远端条目。
     /// 只动 remote_hash IS NOT NULL 的行 —— 纯本地行（remote_hash IS NULL）永远不动。
     pub fn drop_resources_absent_from_manifest(&self, keep: &[(String, String)]) -> Result<usize> {

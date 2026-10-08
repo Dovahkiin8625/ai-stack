@@ -35,9 +35,10 @@ fn resource_dto_serializes_camel_case() {
         indexed_at: "2026-09-29T00:00:00Z".into(),
         page_count: None,
         word_count: Some(120),
+        present: true,
     };
     let json = serde_json::to_string(&dto).expect("serialize");
-    for camel in ["categoryPath", "relPath", "sizeBytes", "indexedAt", "wordCount"] {
+    for camel in ["categoryPath", "relPath", "sizeBytes", "indexedAt", "wordCount", "present"] {
         assert!(json.contains(camel), "missing {camel}: {json}");
     }
     assert!(!json.contains("category_path"), "snake_case leaked: {json}");
