@@ -890,4 +890,177 @@ mod manifest_tests {
             Some("https://example.com/kb")
         );
     }
+
+    /// FINDING A 修复：模拟"已部署用户"的 v1 数据库 → 跑 migrate() → 验证老数据完整保留。
+    /// - 老库 resources 不带 present / remote_hash 两列。
+    /// - 老库已有资源行：迁移后必须 present=1（DEFAULT 1 行为），remote_hash IS NULL（保持纯本地行）。
+    /// - notes 表里的笔记 FK → resources(id)：必须留下来 —— 这是用户的真实数据。
+    ///   一旦 ALTER 顺序错或 FK 重建，这条 INSERT 会失败，测试即抓到。
+    #[test]
+    fn migrate_preserves_existing_resources_with_default_present() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("pre_v2.db");
+
+        // 用裸 Connection 手工拼 v1 schema（不带 present / remote_hash，不带 index_files / app_config）。
+        // 这正是已部署用户的 ai-stack.db 当前的样子。
+        let raw = rusqlite::Connection::open(&path).unwrap();
+        raw.pragma_update(None, "journal_mode", "WAL").unwrap();
+        raw.pragma_update(None, "foreign_keys", "ON").unwrap();
+        raw.execute_batch(
+            "CREATE TABLE schema_version (
+                version INTEGER PRIMARY KEY,
+                applied_at TEXT NOT NULL
+             );
+             CREATE TABLE categories (
+                path TEXT PRIMARY KEY,
+                parent_path TEXT,
+                title TEXT NOT NULL,
+                sort_order INTEGER NOT NULL,
+                FOREIGN KEY (parent_path) REFERENCES categories(path)
+             );
+             CREATE TABLE resources (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                category_path TEXT NOT NULL,
+                rel_path TEXT NOT NULL,
+                type TEXT NOT NULL,
+                title TEXT NOT NULL,
+                size_bytes INTEGER NOT NULL,
+                indexed_at TEXT NOT NULL,
+                page_count INTEGER,
+                word_count INTEGER,
+                UNIQUE(category_path, rel_path),
+                FOREIGN KEY (category_path) REFERENCES categories(path)
+             );
+             CREATE TABLE notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                resource_id INTEGER NOT NULL,
+                content TEXT NOT NULL,
+                anchor_text TEXT,
+                anchor_occurrence INTEGER NOT NULL DEFAULT 0,
+                source TEXT NOT NULL DEFAULT 'user',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL,
+                FOREIGN KEY (resource_id) REFERENCES resources(id) ON DELETE CASCADE
+             );",
+        )
+        .unwrap();
+        raw.execute(
+            "INSERT INTO categories (path, parent_path, title, sort_order)
+             VALUES ('01-基础', NULL, '基础', 1)",
+            [],
+        )
+        .unwrap();
+        raw.execute(
+            "INSERT INTO resources (category_path, rel_path, type, title, size_bytes, indexed_at)
+             VALUES ('01-基础', '回归.md', 'markdown', '回归', 1234, '2026-01-01T00:00:00+00:00')",
+            [],
+        )
+        .unwrap();
+        let res_id: i64 = raw.last_insert_rowid();
+        raw.execute(
+            "INSERT INTO notes (resource_id, content, anchor_occurrence, source, created_at, updated_at)
+             VALUES (?1, '老笔记，必须保留', 0, 'user', '2026-01-01T00:00:00+00:00', '2026-01-01T00:00:00+00:00')",
+            [res_id],
+        )
+        .unwrap();
+        drop(raw); // 关掉裸连接，让 Db::open 重新拿独占
+
+        // 走真实路径：Db::open + migrate()。
+        let mut db = Db::open(&path).unwrap();
+        db.migrate().unwrap();
+
+        // 老资源行还在
+        let row_exists: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM resources WHERE rel_path='回归.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(row_exists, 1, "迁移后老资源行不能丢");
+
+        // present = 1（DEFAULT 1 行为）：老库里的每一行都是躺在磁盘上的本地文件
+        let (present, remote_hash): (i64, Option<String>) = db
+            .conn
+            .query_row(
+                "SELECT present, remote_hash FROM resources WHERE rel_path='回归.md'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(
+            present, 1,
+            "老库迁移后 present 必须默认为 1，否则整个存量库都会被当成\"还没下完\""
+        );
+        assert!(
+            remote_hash.is_none(),
+            "老库迁移后 remote_hash 必须为 NULL（保持纯本地行身份，不会被 manifest prune 删掉）"
+        );
+
+        // FK notes → resources(id) 还在 —— 用户的笔记不能因为迁移而丢
+        let note_count: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM notes WHERE resource_id = ?1",
+                [res_id],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(
+            note_count, 1,
+            "notes → resources(id) 外键必须保留用户笔记（FK 重建会触发 CASCADE 删除）"
+        );
+
+        // v2 新表也建出来了
+        let v2_rows: i64 = db
+            .conn
+            .query_row("SELECT COUNT(*) FROM schema_version WHERE version = 2", [], |r| {
+                r.get(0)
+            })
+            .unwrap();
+        assert_eq!(v2_rows, 1, "schema_version 必须记下 v=2");
+    }
+
+    /// FINDING B 修复：把 manifest 条目塞到三层深的路径（a/b/c/file.md），
+    /// 验证 ensure_category_chain 的 1..=segs.len() 修复确实让所有祖先 category 都建出来了，
+    /// 而且 parent_path 自引用 FK 也正确指向上层。
+    #[test]
+    fn upsert_manifest_inserts_multi_level_category_chain() {
+        let (_t, db) = opened();
+        db.upsert_manifest(&[file("a/b/c/file.md", 10)]).unwrap();
+
+        // 三层 category 全部存在，parent_path 自引用 FK 正确指向上层
+        for (path, expected_parent) in &[
+            ("a", None),
+            ("a/b", Some("a")),
+            ("a/b/c", Some("a/b")),
+        ] {
+            let parent: Option<String> = db
+                .conn
+                .query_row(
+                    "SELECT parent_path FROM categories WHERE path = ?1",
+                    [path],
+                    |r| r.get(0),
+                )
+                .unwrap_or_else(|_| panic!("category {} 没建出来", path));
+            assert_eq!(
+                parent.as_deref(),
+                *expected_parent,
+                "category {} 的 parent_path 错误",
+                path
+            );
+        }
+
+        // 资源行挂在最深层 category 下
+        let n: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM resources WHERE category_path='a/b/c' AND rel_path='file.md'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(n, 1, "资源行必须挂在最深 category 'a/b/c' 下");
+    }
 }
