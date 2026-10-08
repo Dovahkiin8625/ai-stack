@@ -1,3 +1,4 @@
+pub mod sync;
 pub mod db;
 pub mod scanner;
 pub mod reader;
