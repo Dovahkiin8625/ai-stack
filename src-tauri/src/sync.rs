@@ -85,8 +85,26 @@ pub fn split_category(path: &str) -> Option<(String, String)> {
 }
 
 /// 下载来源抽象。生产用 HttpFetcher；单测用 FakeFetcher，不碰网络。
+///
+/// **线程约束（务必看）**：`get` 是同步阻塞调用，必须在没有任何 tokio
+/// 运行时的线程上执行 —— 也就是说，**不能在 Tauri 命令线程或 `spawn_blocking`
+/// 派生的 worker 上调用**。`reqwest::blocking` 内部依赖自己专属的 I/O reactor，
+/// 跟 tokio 的 reactor 互相冲突；在 tokio runtime 内构造或使用会直接 panic。
+/// 正确的派发方式见 `HttpFetcher::new` 的文档。
+///
+/// 之所以把 trait 设计成同步而非 async，是为了让单测能直接用 FakeFetcher 替代，
+/// 不需要拉起任何运行时；命令层必须自己负责把调用搬到合适的线程上。
 pub trait Fetcher: Send + Sync {
     fn get(&self, url: &str) -> Result<Vec<u8>>;
+}
+
+/// 当前线程是否在某个 tokio runtime 内（包括 `#[tokio::test]`、Tauri 命令线程、
+/// `spawn_blocking` worker 等）。
+///
+/// `HttpFetcher::new` 借此提早 fail，避免到 `reqwest::blocking` 内部才 panic。
+/// `pub(crate)` 仅为单测可见 —— 调用方只关心它返回的错误信息。
+pub(crate) fn in_async_runtime() -> bool {
+    tokio::runtime::Handle::try_current().is_ok()
 }
 
 pub struct HttpFetcher {
@@ -94,7 +112,17 @@ pub struct HttpFetcher {
 }
 
 impl HttpFetcher {
+    /// 构造一个 HTTP fetcher。**必须在没有 tokio 运行时的线程上调用**——
+    /// 推荐用 `std::thread::spawn`，等结果用 `tokio::sync::oneshot` 传回，
+    /// 不要用 `tauri::async_runtime::spawn_blocking` 也不要直接 await。
     pub fn new() -> Result<Self> {
+        if in_async_runtime() {
+            anyhow::bail!(
+                "HttpFetcher 不能在 tokio 运行时的线程上构造或使用：\
+                 reqwest::blocking 与 tokio 的 reactor 互斥，在此处会 panic。\
+                 请改用 std::thread::spawn 派生下载线程，并通过 oneshot 把结果传回 Tauri 命令。"
+            );
+        }
         let client = reqwest::blocking::Client::builder()
             .timeout(std::time::Duration::from_secs(60))
             .build()?;
@@ -398,6 +426,18 @@ mod tests {
         let err = ensure_local_at(&root, &PendingFile { category_path: "a".into(), rel_path: "z.md".into(), size: 9 }, "https://x/kb", &f);
         assert!(err.is_err());
         assert!(!root.join("a/z.md").exists(), "失败后不能留下半个文件");
+        // 整个 knowledge/ 里也不该有任何残留文件 —— 防住未来把 temp 写到
+        // <root>/a/z.md.part 之类的实现回归（单看目的路径查不出来）。
+        let leftovers: Vec<_> = walkdir::WalkDir::new(&root)
+            .into_iter()
+            .filter_map(|e| e.ok())
+            .filter(|e| e.file_type().is_file())
+            .collect();
+        assert!(
+            leftovers.is_empty(),
+            "失败后 knowledge/ 里残留了文件：{:?}",
+            leftovers.iter().map(|e| e.path()).collect::<Vec<_>>()
+        );
     }
 
     #[test]
@@ -433,5 +473,44 @@ mod tests {
         assert_eq!(f.calls.lock().unwrap().len(), 3);
         assert_eq!(std::fs::read(root.join("b/3.md")).unwrap(), b"3");
         assert_eq!(seen.lock().unwrap().last().copied(), Some((3, 3)));
+    }
+
+    // ---- HttpFetcher 在 tokio 运行时内的检测 ----
+    //
+    // reqwest::blocking 在 tokio runtime 内构造会 panic，所以我们在
+    // HttpFetcher::new() 入口加了一道提前检查。这里测的是这道检查背后的
+    // helper (`in_async_runtime`)，外加通过 HttpFetcher::new() 验证它真的接上了。
+
+    #[test]
+    fn in_async_runtime_is_false_on_an_ordinary_thread() {
+        // cargo test 默认线程不在任何 tokio runtime 内
+        assert!(!in_async_runtime());
+    }
+
+    #[tokio::test]
+    async fn in_async_runtime_is_true_inside_a_tokio_runtime() {
+        // #[tokio::test] 默认启用了 current-thread runtime
+        assert!(in_async_runtime());
+    }
+
+    #[test]
+    fn http_fetcher_new_bails_with_actionable_error_inside_runtime() {
+        // 在 tokio runtime 内构造 HttpFetcher 必须返回错误而不是 panic，
+        // 否则 Tauri 命令线程上误用会让窗口闪退。
+        let rt = tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap();
+        let result = rt.block_on(async { HttpFetcher::new() });
+        match result {
+            Ok(_) => panic!("在 tokio runtime 内构造 HttpFetcher 必须失败"),
+            Err(err) => {
+                let msg = format!("{err:#}");
+                assert!(
+                    msg.contains("tokio") && msg.contains("std::thread::spawn"),
+                    "错误信息应当点名 root cause 与正确派发方式，实际：{msg}",
+                );
+            }
+        }
     }
 }
