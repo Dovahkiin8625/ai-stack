@@ -9,6 +9,7 @@ import {
 import type { ComponentType } from 'react';
 import { iconForCategoryPath, type LucideIconName } from '../../data/categories';
 import { useLibraryStore } from '../../stores/library';
+import { useUiStore } from '../../stores/ui';
 import type { Category, ResourceType } from '../../types';
 
 const TOP_ICON_MAP: Record<LucideIconName, ComponentType<{ size?: number }>> = {
@@ -112,11 +113,22 @@ export default function Sidebar() {
     });
   };
 
+  const navOpen = useUiStore((s) => s.navOpen);
+  const closeNav = useUiStore((s) => s.closeNav);
+  useEffect(() => {
+    // 路由变化时关闭抽屉 —— 抽屉里点完分类，立刻看到正文
+    useUiStore.getState().closeNav();
+  }, [location.pathname]);
+
   return (
-    <aside
-      aria-label="知识分类导航"
-      className="flex h-full w-72 shrink-0 flex-col border-r border-border bg-surface"
-    >
+    <>
+      <aside
+        aria-label="知识分类导航"
+        className={`flex h-full w-72 shrink-0 flex-col border-r border-border bg-surface
+          transition-transform duration-200 ease-out motion-reduce:transition-none
+          max-md:fixed max-md:inset-y-0 max-md:left-0 max-md:z-50
+          ${navOpen ? 'max-md:translate-x-0' : 'max-md:-translate-x-full'}`}
+      >
       <div className="flex h-14 items-center px-4 border-b border-border">
         <span className="text-base font-semibold tracking-tight">AI Stack</span>
       </div>
@@ -259,5 +271,13 @@ export default function Sidebar() {
         </ul>
       </nav>
     </aside>
+    {navOpen && (
+      <div
+        className="fixed inset-0 z-40 bg-black/40 md:hidden"
+        aria-hidden="true"
+        onClick={closeNav}
+      />
+    )}
+    </>
   );
 }

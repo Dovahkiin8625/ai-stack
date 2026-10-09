@@ -5,7 +5,7 @@ import SyncStatusBar from '../sync/SyncStatusBar';
 
 export default function Layout() {
   return (
-    <div className="flex h-full min-w-[900px] bg-bg text-text">
+    <div className="flex h-full min-w-0 bg-bg text-text">
       <Sidebar />
       <div className="relative flex min-w-0 flex-1 flex-col">
         <Topbar />

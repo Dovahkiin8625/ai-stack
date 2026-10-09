@@ -1,9 +1,11 @@
 import { useMemo } from 'react';
-import { Link, useLocation } from 'react-router-dom';
-import { Settings as SettingsIcon, StickyNote } from 'lucide-react';
+import { Link, useLocation, useNavigate } from 'react-router-dom';
+import { Settings as SettingsIcon, StickyNote, ChevronLeft, Menu } from 'lucide-react';
 import ThemeToggle from '../ui/ThemeToggle';
 import { useNotesStore } from '../../stores/notes';
 import { useLibraryStore } from '../../stores/library';
+import { useUiStore } from '../../stores/ui';
+import { useIsMobile } from '../../lib/useIsMobile';
 import type { ResourceType } from '../../types';
 
 const STATIC_TITLES: Record<string, string> = {
@@ -37,12 +39,39 @@ export default function Topbar() {
   const panelOpen = useNotesStore((s) => s.panelOpen);
   const togglePanel = useNotesStore((s) => s.togglePanel);
 
+  const navigate = useNavigate();
+  const toggleNav = useUiStore((s) => s.toggleNav);
+  // 窄屏且打开了某篇文章时，返回按钮回到该子分类的列表
+  const isMobile = useIsMobile();
+  const articleRoute = /^\/library\/[^/]+\/[^/]+\/[^/]+/.test(pathname);
+  const listRoute = articleRoute
+    ? `/${pathname.split('/').slice(0, 4).join('/')}`
+    : null;
+
   return (
     <header
       role="banner"
       className="relative z-40 flex h-14 shrink-0 items-center justify-between border-b border-border bg-surface px-4"
     >
       <div className="flex min-w-0 items-center gap-3">
+        <button
+          type="button"
+          onClick={toggleNav}
+          aria-label="打开分类导航"
+          className="-ml-2 rounded-md p-2 text-text-muted hover:bg-surface-2 md:hidden"
+        >
+          <Menu size={18} />
+        </button>
+        {isMobile && listRoute && (
+          <button
+            type="button"
+            onClick={() => navigate(listRoute)}
+            aria-label="返回列表"
+            className="-ml-2 rounded-md p-2 text-text-muted hover:bg-surface-2 md:hidden"
+          >
+            <ChevronLeft size={18} />
+          </button>
+        )}
         {article ? (
           <>
             <span className="shrink-0 rounded bg-surface-2 px-2 py-0.5 text-xs font-semibold uppercase tracking-wider text-text-muted">

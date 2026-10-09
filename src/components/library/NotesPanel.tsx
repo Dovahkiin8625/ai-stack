@@ -12,6 +12,18 @@ interface Props {
   onAnchorClick?: (noteId: number) => void;
 }
 
+/** 笔记面板定位：桌面 = 右侧固定栏；窄屏 = 底部抽屉。
+ *  关闭态必须是 transform 移出视口，不能只改透明度 —— 否则面板会永久遮住正文。 */
+export const PANEL_CLASSES = {
+  base: 'fixed z-30 flex flex-col border-border bg-surface',
+  desktop:
+    'md:right-0 md:top-14 md:bottom-0 md:w-[320px] md:border-l md:shadow-[-4px_0_12px_rgba(0,0,0,0.04)]',
+  mobile: 'max-md:inset-x-0 max-md:bottom-0 max-md:h-[70vh] max-md:rounded-t-2xl max-md:border-t',
+  motion: 'transition-transform duration-200 ease-out motion-reduce:transition-none',
+  open: 'translate-x-0',
+  closed: 'max-md:translate-y-full pointer-events-none md:translate-x-full',
+};
+
 function formatTime(iso: string): string {
   try {
     const d = new Date(iso);
@@ -104,8 +116,8 @@ const NotesPanel = forwardRef<NotesPanelHandle, Props>(function NotesPanel({ onA
     <aside
       aria-label="笔记"
       aria-hidden={!panelOpen}
-      className={`fixed right-0 top-14 bottom-0 z-30 flex w-[320px] flex-col border-l border-border bg-surface shadow-[-4px_0_12px_rgba(0,0,0,0.04)] transition-transform duration-200 ease-out motion-reduce:transition-none ${
-        panelOpen ? 'translate-x-0' : 'pointer-events-none translate-x-full'
+      className={`${PANEL_CLASSES.base} ${PANEL_CLASSES.desktop} ${PANEL_CLASSES.mobile} ${PANEL_CLASSES.motion} ${
+        panelOpen ? PANEL_CLASSES.open : PANEL_CLASSES.closed
       }`}
     >
       <div className="flex items-center gap-2 border-b border-border px-3 py-2">
