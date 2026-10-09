@@ -40,6 +40,7 @@ export default function Topbar() {
   const togglePanel = useNotesStore((s) => s.togglePanel);
 
   const navigate = useNavigate();
+  const navOpen = useUiStore((s) => s.navOpen);
   const toggleNav = useUiStore((s) => s.toggleNav);
   // 窄屏且打开了某篇文章时，返回按钮回到该子分类的列表
   const isMobile = useIsMobile();
@@ -57,7 +58,9 @@ export default function Topbar() {
         <button
           type="button"
           onClick={toggleNav}
-          aria-label="打开分类导航"
+          aria-label={navOpen ? '关闭分类导航' : '打开分类导航'}
+          aria-expanded={navOpen}
+          aria-controls="primary-nav-drawer"
           className="-ml-2 rounded-md p-2 text-text-muted hover:bg-surface-2 md:hidden"
         >
           <Menu size={18} />

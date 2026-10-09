@@ -116,6 +116,9 @@ const NotesPanel = forwardRef<NotesPanelHandle, Props>(function NotesPanel({ onA
     <aside
       aria-label="笔记"
       aria-hidden={!panelOpen}
+      // 关闭时一并 inert —— 移出视口后子元素不能继续接受 tab/聚焦，
+      // 否则即使视觉上不可见，键盘也能摸到里面的按钮。
+      inert={!panelOpen}
       className={`${PANEL_CLASSES.base} ${PANEL_CLASSES.desktop} ${PANEL_CLASSES.mobile} ${PANEL_CLASSES.motion} ${
         panelOpen ? PANEL_CLASSES.open : PANEL_CLASSES.closed
       }`}
