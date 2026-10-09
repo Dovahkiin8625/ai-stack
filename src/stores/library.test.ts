@@ -264,8 +264,9 @@ describe('library store', () => {
   it('syncNow returns true when manifest applied and calls scan(false) internally', async () => {
     // synced 路径：syncManifest 返回 skipped=false，syncNow 应当：
     // - 内部调 scan(false) 重建库（避免 caller 再扫一次）
-    // - **不**内部 refreshSyncStatus —— 调用方（启动序列等）自己负责拉 status，
-    //   否则 success 路径会被 IPC 一次然后被紧接着的同值 IPC 覆盖，浪费往返。
+    // - 内部调 refreshSyncStatus 拿最新 present/total —— "sync 成功"必然伴随
+    //   最新 status 是 syncNow 对所有 caller（启动序列、SyncForm）的共同契约，
+    //   移到这里之后 App.tsx 启动序列可以省掉重复的 IPC
     // - 翻回 idle 并返回 true
     const sync = await import('../lib/sync');
     vi.mocked(sync.syncManifest).mockResolvedValueOnce({
@@ -273,7 +274,6 @@ describe('library store', () => {
       indexes: 12,
       skipped: false,
     });
-    vi.mocked(sync.syncStatus).mockClear();
     const api = await import('../lib/library-api');
     vi.mocked(api.scanLibrary).mockClear();
 
@@ -282,7 +282,11 @@ describe('library store', () => {
     expect(synced).toBe(true);
     expect(api.scanLibrary).toHaveBeenCalledTimes(1);
     expect(api.scanLibrary).toHaveBeenCalledWith(false);
-    expect(sync.syncStatus).not.toHaveBeenCalled();
+    // 这两条断言同时 pin 住"syncNow 内部 refresh"：任一失败都意味着实现丢了这个调用，
+    // 而去掉内部 refreshSyncStatus 会让 store.syncStatus 在 synced 路径下保持 null，
+    // SyncForm 等 caller 看到的 status 就是 stale 的。这两条必须双绿。
+    expect(sync.syncStatus).toHaveBeenCalledTimes(1);
+    expect(useLibraryStore.getState().syncStatus?.total).toBe(380);
     expect(useLibraryStore.getState().syncPhase).toBe('idle');
   });
 

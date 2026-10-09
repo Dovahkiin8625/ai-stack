@@ -239,11 +239,10 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // 这一步是 RULING 1 的关键：synced 路径下库由 syncNow 自己重建，
       // caller 不应该再扫一次。
       await get().scan(false);
-      // 不在内部 refreshSyncStatus：每次启动的 startup 序列已经在 syncNow 之后
-      // 显式调一次（App.tsx），由它覆盖所有三个分支（success/skipped/error）；
-      // 若在内部 refresh，success 路径就会 IPC 一次拿到 status 又被 cancel 下一次
-      // 相同的 IPC 覆盖 —— 浪费一次往返。SyncForm 等其他 caller 需要最新统计时
-      // 自己负责调 refreshSyncStatus。
+      // 内部刷一次 status：syncNow 有两个 caller（启动序列 + SyncForm），
+      // 让"sync 成功"必然伴随最新统计是这两个 caller 的共同契约；caller 不必
+      // 自己再调 refreshSyncStatus，App.tsx 启动序列因此可以省掉重复的 IPC。
+      await get().refreshSyncStatus();
       set({ syncPhase: 'idle' });
       return true;
     } catch (e) {
