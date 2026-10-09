@@ -8,6 +8,10 @@
     "store:default",
     "window-state:default",
     "fs:default",
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [{ "path": "$RESOURCE/**" }]
+    },
     "dialog:default",
     "sql:default"
   ]

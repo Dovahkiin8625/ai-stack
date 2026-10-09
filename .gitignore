@@ -16,7 +16,7 @@ vitest.config.d.ts
 # Rust / Tauri
 src-tauri/target/
 src-tauri/Cargo.lock
-src-tauri/gen/
+src-tauri/gen/schemas/
 
 # 用户数据
 data/

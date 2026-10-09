@@ -10,12 +10,15 @@ use tauri::Manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
-    tauri::Builder::default()
+    let builder = tauri::Builder::default()
         .plugin(tauri_plugin_store::Builder::default().build())
-        .plugin(tauri_plugin_window_state::Builder::default().build())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
-        .plugin(tauri_plugin_sql::Builder::default().build())
+        .plugin(tauri_plugin_sql::Builder::default().build());
+    // window-state 桌面独占：Android/iOS 上单窗口模型没有窗口位置可保存
+    #[cfg(desktop)]
+    let builder = builder.plugin(tauri_plugin_window_state::Builder::default().build());
+    builder
         .setup(|app| {
             // AppState 只持有不可变路径；不可在 commands::build_state 之后再修改
             let state = commands::build_state(app.handle());
