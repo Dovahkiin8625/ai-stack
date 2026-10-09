@@ -61,7 +61,7 @@ export default function Topbar() {
           aria-label={navOpen ? '关闭分类导航' : '打开分类导航'}
           aria-expanded={navOpen}
           aria-controls="primary-nav-drawer"
-          className="-ml-2 rounded-md p-2 text-text-muted hover:bg-surface-2 md:hidden"
+          className="-ml-2 rounded-md p-2 text-text-muted hover:bg-surface-2 active:bg-surface-2/70 md:hidden"
         >
           <Menu size={18} />
         </button>
@@ -70,7 +70,7 @@ export default function Topbar() {
             type="button"
             onClick={() => navigate(listRoute)}
             aria-label="返回列表"
-            className="-ml-2 rounded-md p-2 text-text-muted hover:bg-surface-2 md:hidden"
+            className="-ml-2 rounded-md p-2 text-text-muted hover:bg-surface-2 active:bg-surface-2/70 md:hidden"
           >
             <ChevronLeft size={18} />
           </button>
@@ -110,7 +110,7 @@ export default function Topbar() {
           className={`rounded-md p-2 transition-colors ${
             panelOpen
               ? 'bg-accent/10 text-accent'
-              : 'text-text-muted hover:bg-surface-2 hover:text-text'
+              : 'text-text-muted hover:bg-surface-2 active:bg-surface-2/70 hover:text-text'
           }`}
         >
           <StickyNote size={18} />
@@ -121,7 +121,7 @@ export default function Topbar() {
         <Link
           to="/settings"
           aria-label="设置"
-          className="rounded-md p-2 text-text-muted hover:bg-surface-2 hover:text-text"
+          className="rounded-md p-2 text-text-muted hover:bg-surface-2 active:bg-surface-2/70 hover:text-text"
         >
           <SettingsIcon size={18} />
         </Link>

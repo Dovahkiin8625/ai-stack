@@ -175,12 +175,12 @@ export default function Sidebar() {
                     className={`group flex items-center rounded-md text-sm transition-colors ${
                       isActive
                         ? 'bg-accent/10 text-accent'
-                        : 'text-text hover:bg-surface-2'
+                        : 'text-text hover:bg-surface-2 active:bg-surface-2/70'
                     }`}
                   >
                     <NavLink
                       to={`/library/${cat.path}`}
-                      className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-1.5"
+                      className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-2 py-2 min-h-[44px] max-md:min-h-[48px]"
                     >
                       {Icon && <Icon size={16} />}
                       <span className="truncate">{cat.title}</span>
@@ -195,7 +195,7 @@ export default function Sidebar() {
                           e.stopPropagation();
                           toggleExpand(cat.path);
                         }}
-                        className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-text-muted hover:bg-surface-2 hover:text-text"
+                        className="mr-1 flex h-9 w-9 max-md:h-11 max-md:w-11 shrink-0 items-center justify-center rounded-md text-text-muted hover:bg-surface-2 active:bg-surface-2/70 hover:text-text"
                       >
                         {isOpen ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
                       </button>
@@ -219,7 +219,7 @@ export default function Sidebar() {
                                   `flex min-w-0 flex-1 items-center rounded-md px-2 py-1 transition-colors ${
                                     isSubActive
                                       ? 'bg-accent/10 text-accent'
-                                      : 'text-text-muted hover:bg-surface-2 hover:text-text'
+                                      : 'text-text-muted hover:bg-surface-2 active:bg-surface-2/70 hover:text-text'
                                   }`
                                 }
                               >
@@ -230,7 +230,7 @@ export default function Sidebar() {
                                 aria-label={isSubOpen ? '折叠文章列表' : '展开文章列表'}
                                 aria-expanded={isSubOpen}
                                 onClick={() => toggleExpand(sub.path)}
-                                className="mr-1 flex h-6 w-6 shrink-0 items-center justify-center rounded-md text-text-muted hover:bg-surface-2 hover:text-text"
+                                className="mr-1 flex h-9 w-9 max-md:h-11 max-md:w-11 shrink-0 items-center justify-center rounded-md text-text-muted hover:bg-surface-2 active:bg-surface-2/70 hover:text-text"
                               >
                                 {isSubOpen ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
                               </button>
@@ -254,10 +254,10 @@ export default function Sidebar() {
                                         <NavLink
                                           to={`/library/${cat.path}/${subSlug}/${r.id}`}
                                           className={() =>
-                                            `flex items-center gap-1.5 rounded-md px-2 py-1 text-xs transition-colors ${
+                                            `flex items-center gap-1.5 rounded-md px-2 py-1.5 text-xs min-h-[40px] max-md:min-h-[48px] transition-colors ${
                                               isArticleActive
                                                 ? 'bg-accent/10 text-accent'
-                                                : 'text-text-muted hover:bg-surface-2 hover:text-text'
+                                                : 'text-text-muted hover:bg-surface-2 active:bg-surface-2/70 hover:text-text'
                                             }`
                                           }
                                         >

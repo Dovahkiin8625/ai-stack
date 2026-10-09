@@ -302,7 +302,7 @@ function EntryLink({
   return (
     <Link
       to={`${linkBase}/${resource.id}`}
-      className="block px-4 py-2.5 transition-colors hover:bg-surface-2"
+      className="block px-4 py-2.5 transition-colors hover:bg-surface-2 active:bg-surface-2/70"
     >
       <div className="flex items-center gap-3 text-sm">
         {Icon && <Icon size={16} className="shrink-0 text-text-muted" />}
@@ -368,7 +368,7 @@ function UnlistedGroup({
             <li key={r.id}>
               <Link
                 to={`${linkBase}/${r.id}`}
-                className="block px-4 py-2.5 transition-colors hover:bg-surface-2"
+                className="block px-4 py-2.5 transition-colors hover:bg-surface-2 active:bg-surface-2/70"
               >
                 <div className="flex items-center gap-3 text-sm">
                   {Icon && <Icon size={16} className="shrink-0 text-text-muted" />}
