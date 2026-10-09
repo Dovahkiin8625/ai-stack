@@ -36,7 +36,8 @@
       "icons/icon.ico"
     ],
     "resources": {
-      "../resources/knowledge/": "knowledge/"
+      "seed/seed-manifest.json": "seed-manifest.json",
+      "seed/knowledge/": "knowledge/"
     }
   }
 }
