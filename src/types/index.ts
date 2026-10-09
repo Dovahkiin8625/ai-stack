@@ -26,6 +26,8 @@ export interface Resource {
   indexedAt: string;
   pageCount: number | null;
   wordCount: number | null;
+  /** 文件是否已缓存到本地 knowledge/ 目录。false = 点开会自动下载。 */
+  present: boolean;
 }
 
 /**
@@ -170,4 +172,49 @@ export interface NoteUpdateInput {
   source?: NoteSource;
   /** 改 PDF 笔记页码时使用；不传则保留原 pageIdx（翻页跳转不失效）。 */
   pageIdx?: number | null;
+}
+
+// === Phase 7: remote knowledge sync ===
+
+/**
+ * 后端 sync_status 响应。统计 + 配置状态；
+ * - `configured: false` 时 UI 不显示同步状态条（纯本地模式）
+ * - `present` / `total` 用来渲染进度；`totalBytes` / `cachedBytes` 给字节级展示用
+ */
+export interface SyncStatus {
+  total: number;
+  present: number;
+  totalBytes: number;
+  cachedBytes: number;
+  /** 是否配置了远端地址；false 时 UI 不显示同步状态条 */
+  configured: boolean;
+}
+
+/**
+ * sync_manifest 响应。
+ * - `skipped: true` 表示后端没配 base_url（纯本地 / 开发者模式），前端不应当成错误
+ * - `files` / `indexes` 是落库的条目数（落库后才有统计意义）
+ */
+export interface SyncManifestResult {
+  files: number;
+  indexes: number;
+  skipped: boolean;
+}
+
+/**
+ * 后端 download_all / materialize_seed 通过事件回传的进度载荷。
+ *
+ * 实际形状尖锐得多 —— 不能假设"完整 = 成功"：
+ * - 什么都没得下时后端**不 emit 任何事件**就返回；消费者不应把"没事件"当卡死
+ * - `done === total` 也可能是单文件全部 404 的失败批（后端 batch loop 吞单条错）
+ * - 整批失败时事件是 `{done: 0, total: 0, error: '...'}`，与正常形状只能靠
+ *   `error` 字段的存在与否区分 —— 因此这里把它声明为 optional
+ *
+ * 后续做状态条 UI 时，必须按这些事实推断状态，不能假定"完成 == 全部成功"。
+ */
+export interface SyncProgress {
+  done: number;
+  total: number;
+  /** 整批失败时由后端写入；正常进度事件不带这个字段。 */
+  error?: string;
 }
