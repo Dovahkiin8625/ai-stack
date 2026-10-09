@@ -17,12 +17,15 @@ function fmtBytes(n: number): string {
  * 2. 已全缓存（present >= total） → 不渲染 —— "已缓存 380 / 380" 的条没意义
  * 3. 下载中（syncPhase='downloading'） → 显示进度，隐藏「下载全部」按钮
  *    （RULING 2：disable 而不是假装 暂停 —— 后端 fire-and-forget 无法中断）
- * 4. 同步出错（syncPhase='error'） → 按钮变「重试」，由 sync_progress 事件的
- *    `error` 字段或 downloadAll action 自身抛错触发（RULING 3：error 字段驱动）
- * 5. 其余 → 显示「已缓存 X / Y」+「下载全部」按钮
+ * 4. 其余 → 显示「已缓存 X / Y」+「下载全部」按钮
  *
  * 不论如何，本组件**绝不**断言"全部完成"：terminal 事件 {done=total} 与"整批全部
  * 404"在形状上不可分（RULING 3）—— 终止后只去 refreshSyncStatus 拿最新数据。
+ *
+ * 故意不区分错误态下的文案。"syncPhase === 'error'" 由三处写入（manifest IPC 抛错、
+ * downloadAll IPC 抛错、batch 事件带 error 字段），按钮 onClick 永远调 downloadAll——
+ * 若把按钮改成「重试」会让 manifest 失败的用户点击后开去 380 文件批量下载，与原意
+ * 严重背离。重新同步另有路径（设置页保存、或下次启动），不在此处添加 affordance。
  */
 export default function SyncStatusBar() {
   const status = useLibraryStore((s) => s.syncStatus);
@@ -33,6 +36,7 @@ export default function SyncStatusBar() {
   useEffect(() => {
     // RULING 4：mount 时订阅、unmount 时取消 —— 组件重挂时旧回调泄漏是个真实的内存/逻辑漏洞。
     let unlisten: (() => void) | undefined;
+    let cancelled = false;
     void onSyncProgress((p) => {
       // 始终把最新 done/total 写回；store 内部据此决定要不要切 phase。
       useLibraryStore.setState({ downloadProgress: { done: p.done, total: p.total } });
@@ -52,9 +56,16 @@ export default function SyncStatusBar() {
         void useLibraryStore.getState().refreshSyncStatus();
       }
     }).then((u) => {
-      unlisten = u;
+      // 竞态：组件可能在 promise resolve 前 unmount。若已 cancelled，立刻把这次
+      // subscribe 出来的 unlisten 调掉，避免 listener 累积泄漏到长生命周期窗口。
+      if (cancelled) {
+        u();
+      } else {
+        unlisten = u;
+      }
     });
     return () => {
+      cancelled = true;
       unlisten?.();
     };
   }, []);
@@ -63,7 +74,6 @@ export default function SyncStatusBar() {
   if (status.total === 0 || status.present >= status.total) return null;
 
   const downloading = phase === 'downloading';
-  const errored = phase === 'error';
 
   return (
     <div
@@ -88,7 +98,7 @@ export default function SyncStatusBar() {
           onClick={() => void downloadAll()}
           className="ml-auto shrink-0 rounded px-2 py-1 text-accent hover:bg-accent/10"
         >
-          {errored ? '重试' : '下载全部'}
+          下载全部
         </button>
       )}
     </div>
