@@ -1,0 +1,331 @@
+{
+  "version": "2026-10-09T00:46:37.053Z",
+  "files": [
+    {
+      "path": "01-foundations/01-mathematics/_index.md",
+      "size": 1296,
+      "sha256": "6d4085eb8df99e83fad9662f29a88ae85ad10ccc8a2ba7cd92aedcb761e89a26"
+    },
+    {
+      "path": "01-foundations/02-computer-science/_index.md",
+      "size": 1061,
+      "sha256": "0121d69cc363b8cc2360cddcb130d02b8a16e255e060760a8544fa7ebe3ad482"
+    },
+    {
+      "path": "01-foundations/03-ml-basics/_index.md",
+      "size": 1640,
+      "sha256": "b3169c745c2954aa854f657184b1b63241c3018b3b73fc23965b9f41fc5231bb"
+    },
+    {
+      "path": "02-deep-learning/cnn/_index.md",
+      "size": 1454,
+      "sha256": "9efaf7b67d0a970e297800a8bfbcfb68cda55d4f9ee8360654b8b7cc06b946be"
+    },
+    {
+      "path": "02-deep-learning/frameworks/_index.md",
+      "size": 1263,
+      "sha256": "48163f7654cb3bad552d3036913fae209e66f7b977286e1ef00ccc42e841cda6"
+    },
+    {
+      "path": "02-deep-learning/neural-network-fundamentals/_index.md",
+      "size": 1276,
+      "sha256": "2d883243a5e99dfc427e4634fc269577ae62c4d6dc7fe14146b9d812280464f1"
+    },
+    {
+      "path": "02-deep-learning/rnn-lstm/_index.md",
+      "size": 1442,
+      "sha256": "bc4efc0a941815c15d19a8d8d77c0ce6e4edba6774fd97e255fcda4132dbb241"
+    },
+    {
+      "path": "02-deep-learning/training-techniques/_index.md",
+      "size": 1673,
+      "sha256": "7c0728fbdc90172035d713bfc81d0f9bee3715a5d54b66ba976ddf8fa19b43c2"
+    },
+    {
+      "path": "02-deep-learning/transformers/_index.md",
+      "size": 1695,
+      "sha256": "c4f2b147a057fed3cfd4d4ed17bd7522cecf2f7b664ce263c2a93bb2f3682d43"
+    },
+    {
+      "path": "03-large-language-models/architecture-pretraining/_index.md",
+      "size": 1056,
+      "sha256": "a532947ae2f6f44e7e86fe8fc4e50e7eef9c2c712f61361fcf953e4bc2146005"
+    },
+    {
+      "path": "03-large-language-models/fine-tuning/_index.md",
+      "size": 889,
+      "sha256": "38aa45eace89567a43505981453680052382683cc64dce2f3afc8ff6c3f692da"
+    },
+    {
+      "path": "03-large-language-models/inference-optimization/_index.md",
+      "size": 868,
+      "sha256": "0e0a68cb348804b832e7927af7ed5f9073c452b9e0bd9102b6ff271a929de76e"
+    },
+    {
+      "path": "03-large-language-models/llm-applications/_index.md",
+      "size": 635,
+      "sha256": "55dda8e288de4f3e2e215edc6e296c42763e3dda880099dede469801fdc58eec"
+    },
+    {
+      "path": "03-large-language-models/multimodal-llm/_index.md",
+      "size": 841,
+      "sha256": "9e67113ecbc579e3792ab8e9b6a13ea023add59a0578961778209dba48cf0a42"
+    },
+    {
+      "path": "03-large-language-models/prompt-engineering/_index.md",
+      "size": 672,
+      "sha256": "0ceeb5dc10ac2e38be08fbbe8b4c90b0ea27da8fbf9599f8305122f741475237"
+    },
+    {
+      "path": "03-large-language-models/rag/_index.md",
+      "size": 272,
+      "sha256": "d847b874f25bc264649e1f639d8145612e132009da3ba44dca7db0427920daa4"
+    },
+    {
+      "path": "04-computer-vision/3d-vision/_index.md",
+      "size": 544,
+      "sha256": "b6a5451918d61db9fdf1fed0010fd0a0bcd0abee7bda3812cb94c62d6f1678c3"
+    },
+    {
+      "path": "04-computer-vision/image-classification/_index.md",
+      "size": 531,
+      "sha256": "5c81d0b96fcb1d1fa3c8c30697864cb47f252f4a0b65eb173c9e5a3496434d9f"
+    },
+    {
+      "path": "04-computer-vision/image-generation/_index.md",
+      "size": 646,
+      "sha256": "17a6070ae3e8ff1d556c5b1110ecf2407dcb024e2410f77ca8f1e75d34a34046"
+    },
+    {
+      "path": "04-computer-vision/object-detection/_index.md",
+      "size": 635,
+      "sha256": "591b62d8351cb16fff5789605bba7a74d3de67e94908ad81d6154b4fc441fedb"
+    },
+    {
+      "path": "04-computer-vision/segmentation/_index.md",
+      "size": 679,
+      "sha256": "b9e15f880f3f063eddc1bc0656636388b68910aed9165a6a975baeca5823185b"
+    },
+    {
+      "path": "04-computer-vision/video-understanding/_index.md",
+      "size": 614,
+      "sha256": "d7f288165223ffe60da66346b4254f5f87763bac6afeca2718d90bbc933db6d3"
+    },
+    {
+      "path": "05-nlp/information-extraction/_index.md",
+      "size": 612,
+      "sha256": "9103afbb50e958c756bf0c09718090fb56d6be3a2d8b31a1cf0369b844419184"
+    },
+    {
+      "path": "05-nlp/machine-translation/_index.md",
+      "size": 615,
+      "sha256": "b625ba79ce4382d067a3abae45b9703f959339fd5ee8acdbe99a90e8dfb477b1"
+    },
+    {
+      "path": "05-nlp/question-answering/_index.md",
+      "size": 728,
+      "sha256": "19825cc54121adb624300a80f9e71077adbefdf14da9acbdb737d638b792afe1"
+    },
+    {
+      "path": "05-nlp/sequence-labeling/_index.md",
+      "size": 596,
+      "sha256": "17943c390121251dfa4e86cfabdbc58a18e41331b471e2413739cb59f5b6f6ce"
+    },
+    {
+      "path": "05-nlp/text-generation/_index.md",
+      "size": 605,
+      "sha256": "ae75c987c3e12b9795781b2ac98b0ea13794b22861f81a2ff9fd0721d65f2d65"
+    },
+    {
+      "path": "05-nlp/text-representation/_index.md",
+      "size": 929,
+      "sha256": "23abb7d8df82ba5380864a680319e8de6b774fffebddea506a263d92ebd438b0"
+    },
+    {
+      "path": "06-speech-audio/asr/_index.md",
+      "size": 654,
+      "sha256": "197f979ea7953e689b80810479f71f216ab4543c1d9a766ad966048f0724f417"
+    },
+    {
+      "path": "06-speech-audio/audio-generation/_index.md",
+      "size": 711,
+      "sha256": "b7cffd261e09b660f96b8e8ecb9eb99c0f04a8779120630e9782e3df7d0c9642"
+    },
+    {
+      "path": "06-speech-audio/tts/_index.md",
+      "size": 619,
+      "sha256": "e1b6e49c0525cdd8f36818c42c900216ca665874aa3d39aaed54ef840d9e2471"
+    },
+    {
+      "path": "06-speech-audio/voice-cloning/_index.md",
+      "size": 633,
+      "sha256": "b985807cd8e333f252a446527344c51ccbdcea93d75bcf1797c9ba728126f04c"
+    },
+    {
+      "path": "07-ai-engineering/agent-frameworks/_index.md",
+      "size": 218,
+      "sha256": "856f332bdd0519dde9a6b925fb1ba0aa42256938fb431eac7c451a3c18b930e7"
+    },
+    {
+      "path": "07-ai-engineering/data-engineering/_index.md",
+      "size": 218,
+      "sha256": "c03d1f324f0fd9504b378cb9067d8a19ef3cc01bd385baa09793b46eeae403fb"
+    },
+    {
+      "path": "07-ai-engineering/experiment-tracking/_index.md",
+      "size": 230,
+      "sha256": "4ad723455a62fb843f14947fa003ccdffb71bf4ab13466d7402422cf4bd2d26b"
+    },
+    {
+      "path": "07-ai-engineering/model-deployment/_index.md",
+      "size": 218,
+      "sha256": "9eddbf3f31077112b740421f36887ed1d13d07c549498e26247bb720aea8305e"
+    },
+    {
+      "path": "07-ai-engineering/model-serving/_index.md",
+      "size": 206,
+      "sha256": "fe2bc70e40c0e12d837b1ae225edfa6cb893ac8aae14b9a36dd5a0fb9b1d454a"
+    },
+    {
+      "path": "07-ai-engineering/monitoring/_index.md",
+      "size": 194,
+      "sha256": "5dbb72dbff9c52e75361a3142f4421602e6854c7343dd054114834d9d31363a0"
+    },
+    {
+      "path": "07-ai-engineering/vector-databases/_index.md",
+      "size": 218,
+      "sha256": "b5c4bce3abec2fc72a69387a6e12aca961efb4691e76f81b99f6be34348a4d8c"
+    },
+    {
+      "path": "08-ai-agents/architectures/_index.md",
+      "size": 305,
+      "sha256": "ff2ee1475ad6716c10d6187b4baa946e6a3d9a4248b5116f2e98b70f222b0cc3"
+    },
+    {
+      "path": "08-ai-agents/memory-systems/_index.md",
+      "size": 316,
+      "sha256": "5219973bcf836514817661f12f34e7974475867b0a11d6d21c1623829e3ef771"
+    },
+    {
+      "path": "08-ai-agents/multi-agent/_index.md",
+      "size": 297,
+      "sha256": "7d7b1febe7a0357c825349248cb47bb59c1a364203081209654206d5fe34ef09"
+    },
+    {
+      "path": "08-ai-agents/planning-reasoning/_index.md",
+      "size": 426,
+      "sha256": "1c5328986e45467fa51a964842149ccce6d5e111fe89a0238ca2b35a48481a6d"
+    },
+    {
+      "path": "08-ai-agents/tool-use/_index.md",
+      "size": 390,
+      "sha256": "6b6af884d70bbb8d7ceb8792595b3f9a40be687c75d337248f7a1a51e6624b5c"
+    },
+    {
+      "path": "09-ai-safety/alignment/_index.md",
+      "size": 375,
+      "sha256": "e35fd6fbe0bf4484ba8d37a5c426ed4feb5389786a732321dbafb5dc3ab6b251"
+    },
+    {
+      "path": "09-ai-safety/bias-fairness/_index.md",
+      "size": 459,
+      "sha256": "f7fa4af56fb06b7d388f495634fbf7ec540dc4f2a7a74acedad4405354f838d9"
+    },
+    {
+      "path": "09-ai-safety/interpretability/_index.md",
+      "size": 454,
+      "sha256": "d3dfe07bcc095c5f5946248ba62b095c26b7bc25483f3aeb49fde33a6a6f656c"
+    },
+    {
+      "path": "09-ai-safety/privacy/_index.md",
+      "size": 425,
+      "sha256": "607887a43368847c70e78ba8919a962400b80fdddd033bd795b1152e90c67f46"
+    },
+    {
+      "path": "09-ai-safety/red-teaming/_index.md",
+      "size": 438,
+      "sha256": "d08d312321d44c5981d1eb2b1522217e484d385547dca357a2248e529b22a1b0"
+    },
+    {
+      "path": "10-applications/ai-for-code/_index.md",
+      "size": 395,
+      "sha256": "36d2467f5c56f14ae6c7cead26880bcf0f6f44a3ae43c07193a94de1d63eaf09"
+    },
+    {
+      "path": "10-applications/ai-for-education/_index.md",
+      "size": 456,
+      "sha256": "f17d692fe116cb7d6aaacb36176bb0be1661b0347f12d982a05d8789d63922ff"
+    },
+    {
+      "path": "10-applications/ai-for-finance/_index.md",
+      "size": 460,
+      "sha256": "9244b330183b7eb3bf268840f87bd71b9640635f5557f5e5b88a4c5f96bac68d"
+    },
+    {
+      "path": "10-applications/ai-for-healthcare/_index.md",
+      "size": 427,
+      "sha256": "3e512a3ca2a659fe3fe49068ddfeacc88a7ffa78be7079244ec0f00a061c941b"
+    },
+    {
+      "path": "10-applications/ai-for-science/_index.md",
+      "size": 425,
+      "sha256": "3a4b6e033780afd941fe1a678bc44b645a07d712effb19bfa183ba2c11a4b8c3"
+    },
+    {
+      "path": "10-applications/robotics/_index.md",
+      "size": 402,
+      "sha256": "4934a8010f9ec17afbe52e4460ebd5456df6ab2ecfe719d56ffbe7b1faec5600"
+    },
+    {
+      "path": "11-tools-ecosystem/benchmarks/_index.md",
+      "size": 504,
+      "sha256": "554bb9436ee550cf591d5f5ab5a1a134dee4b47864b4e258ef5e479d57ddac8c"
+    },
+    {
+      "path": "11-tools-ecosystem/cloud-platforms/_index.md",
+      "size": 492,
+      "sha256": "a3c6ea0cc5778661a8751680674ce5a62e733392005cf2eb08eb8653326e1e46"
+    },
+    {
+      "path": "11-tools-ecosystem/datasets/_index.md",
+      "size": 474,
+      "sha256": "9cf4a54fc9220d7e95bff83665d142b12d3a49f43a39c400be79c4c893dad731"
+    },
+    {
+      "path": "11-tools-ecosystem/development-tools/_index.md",
+      "size": 537,
+      "sha256": "4770583799221c623db20ace968ca7bbf71feb3b2c78e35dd6ac2b2945166ffc"
+    },
+    {
+      "path": "11-tools-ecosystem/open-source-models/_index.md",
+      "size": 524,
+      "sha256": "01c1f1b7c4fc90d1ed305216e04097c7d91d93a4887b28fbbeb99dfecfb63924"
+    },
+    {
+      "path": "12-industry-trends/_index.md",
+      "size": 1254,
+      "sha256": "f42bf590fdb32b5f10bb9ae3704a4fb2ae81c14dedd000a9155425351d411db0"
+    },
+    {
+      "path": "12-industry-trends/conferences/_index.md",
+      "size": 429,
+      "sha256": "343b86889cbfbcf2811d604b7708df0679c4ce48c0555792db8bc9d840697501"
+    },
+    {
+      "path": "12-industry-trends/frontier-papers/_index.md",
+      "size": 491,
+      "sha256": "130eadfbe72d6d52b14d7f0741254eed0665bb2a559c175ef607d53a0799888f"
+    },
+    {
+      "path": "12-industry-trends/industry-reports/_index.md",
+      "size": 474,
+      "sha256": "32f5632ba0fda508c7284e477d2d9b9ba162aae4d30e20a4f86dd6f719634e98"
+    },
+    {
+      "path": "12-industry-trends/news-updates/_index.md",
+      "size": 413,
+      "sha256": "545687db5e006f2cb92983d3629367ab4cb12ffe1848271b7bb82e9bb9af04ae"
+    }
+  ],
+  "indexes": []
+}
