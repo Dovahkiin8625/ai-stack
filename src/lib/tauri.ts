@@ -20,7 +20,7 @@ export interface AppSettings {
   lightweightModel: string;
   /** 高性能模型：讲解、深度分析等复杂任务。可启用 thinking。 */
   performanceModel: string;
-  /** 知识库远端同步根目录（manifest.json + knowledge/）。空字符串 = 未配置，纯本地模式。 */
+  /** 知识库远端同步静态托管根目录（manifest.json 与各分类目录平铺的发布树）。空字符串 = 未配置，纯本地模式。 */
   syncBaseUrl: string;
 }
 
