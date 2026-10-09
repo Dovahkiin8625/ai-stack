@@ -1,7 +1,6 @@
 {
-  "version": "2026-10-09T00:35:43.453Z",
-  "files": [],
-  "indexes": [
+  "version": "2026-10-09T00:46:37.053Z",
+  "files": [
     {
       "path": "01-foundations/01-mathematics/_index.md",
       "size": 1296,
@@ -327,5 +326,6 @@
       "size": 413,
       "sha256": "545687db5e006f2cb92983d3629367ab4cb12ffe1848271b7bb82e9bb9af04ae"
     }
-  ]
+  ],
+  "indexes": []
 }
