@@ -11,6 +11,7 @@ const KEY_MODEL_LIGHTWEIGHT = 'lightweightModel';
 const KEY_MODEL_PERFORMANCE = 'performanceModel';
 /** 旧版单一 model 字段，仅在 getSettings 时做一次性迁移读取。 */
 const KEY_MODEL_LEGACY = 'model';
+const KEY_SYNC_BASE_URL = 'syncBaseUrl';
 
 export interface AppSettings {
   apiKey: string;
@@ -19,6 +20,8 @@ export interface AppSettings {
   lightweightModel: string;
   /** 高性能模型：讲解、深度分析等复杂任务。可启用 thinking。 */
   performanceModel: string;
+  /** 知识库远端同步根目录（manifest.json + knowledge/）。空字符串 = 未配置，纯本地模式。 */
+  syncBaseUrl: string;
 }
 
 const DEFAULTS: AppSettings = {
@@ -28,6 +31,7 @@ const DEFAULTS: AppSettings = {
   lightweightModel: 'claude-haiku-4-5-20251001',
   // Sonnet 4.5：能力强、可挂 thinking，适合讲解/分析类任务
   performanceModel: 'claude-sonnet-4-5',
+  syncBaseUrl: '',
 };
 
 export { DEFAULTS };
@@ -65,6 +69,7 @@ export async function getSettings(): Promise<AppSettings> {
       baseUrl,
       lightweightModel: lightweightModel || DEFAULTS.lightweightModel,
       performanceModel: performanceModel || DEFAULTS.performanceModel,
+      syncBaseUrl: (await store.get<string>(KEY_SYNC_BASE_URL)) ?? DEFAULTS.syncBaseUrl,
     };
   } catch {
     return DEFAULTS;
@@ -79,5 +84,7 @@ export async function saveSettings(s: Partial<AppSettings>): Promise<void> {
     await store.set(KEY_MODEL_LIGHTWEIGHT, s.lightweightModel);
   if (s.performanceModel !== undefined)
     await store.set(KEY_MODEL_PERFORMANCE, s.performanceModel);
+  if (s.syncBaseUrl !== undefined)
+    await store.set(KEY_SYNC_BASE_URL, s.syncBaseUrl);
   await store.save();
 }

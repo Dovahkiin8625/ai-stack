@@ -1,4 +1,5 @@
 import ApiKeyForm from '../components/settings/ApiKeyForm';
+import SyncForm from '../components/settings/SyncForm';
 
 export default function Settings() {
   return (
@@ -13,6 +14,13 @@ export default function Settings() {
           AI 服务
         </h3>
         <ApiKeyForm />
+      </section>
+
+      <section className="mt-6">
+        <h3 className="mb-3 text-sm font-semibold uppercase tracking-wider text-text-muted">
+          知识库同步
+        </h3>
+        <SyncForm />
       </section>
     </div>
   );
