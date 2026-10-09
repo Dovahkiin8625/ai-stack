@@ -1,12 +1,13 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
-  "identifier": "default",
-  "description": "默认权限（移动端；桌面专属权限见 capabilities/desktop.json）",
+  "identifier": "desktop",
+  "description": "桌面专属权限（window-state 等移动端不可用的插件）。",
   "windows": ["main"],
-  "platforms": ["android", "iOS"],
+  "platforms": ["windows", "linux", "macOS"],
   "permissions": [
     "core:default",
     "store:default",
+    "window-state:default",
     "fs:default",
     {
       "identifier": "fs:allow-read-file",
