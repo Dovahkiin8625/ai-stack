@@ -42,17 +42,17 @@ export default function Topbar() {
   const navigate = useNavigate();
   const navOpen = useUiStore((s) => s.navOpen);
   const toggleNav = useUiStore((s) => s.toggleNav);
-  // 窄屏且打开了某篇文章时，返回按钮回到该子分类的列表
   const isMobile = useIsMobile();
+  // 文章页需要返回按钮（回到它所在的子分类列表）
   const articleRoute = /^\/library\/[^/]+\/[^/]+\/[^/]+/.test(pathname);
-  const listRoute = articleRoute
-    ? `/${pathname.split('/').slice(0, 4).join('/')}`
-    : null;
+  // 窄屏下任何非根级路由都需要一个返回按钮。navigate(-1) 走浏览器历史，
+  // 历史为空时停留在原地——比硬编码回 /library 更符合用户预期。
+  const canGoBack = articleRoute || pathname === '/settings';
 
   return (
     <header
       role="banner"
-      className="relative z-40 flex h-14 shrink-0 items-center justify-between border-b border-border bg-surface px-4"
+      className="relative z-40 flex min-h-14 shrink-0 items-center justify-between border-b border-border bg-surface px-4 pt-[env(safe-area-inset-top)]"
     >
       <div className="flex min-w-0 items-center gap-3">
         <button
@@ -65,11 +65,11 @@ export default function Topbar() {
         >
           <Menu size={18} />
         </button>
-        {isMobile && listRoute && (
+        {isMobile && canGoBack && (
           <button
             type="button"
-            onClick={() => navigate(listRoute)}
-            aria-label="返回列表"
+            onClick={() => navigate(-1)}
+            aria-label={articleRoute ? '返回列表' : '返回'}
             className="-ml-2 rounded-md p-2 text-text-muted hover:bg-surface-2 active:bg-surface-2/70 md:hidden"
           >
             <ChevronLeft size={18} />
@@ -77,25 +77,26 @@ export default function Topbar() {
         )}
         {article ? (
           <>
+            {/* 类型徽章在小屏也保留（只占 ~50px），标题/页数/字数挪到正文区，避免顶栏过挤 */}
             <span className="shrink-0 rounded bg-surface-2 px-2 py-0.5 text-xs font-semibold uppercase tracking-wider text-text-muted">
               {TYPE_LABELS[article.type]}
             </span>
-            <span className="truncate text-base font-semibold">
+            <span className="hidden truncate text-base font-semibold md:inline">
               {article.title}
             </span>
             {article.pageCount != null && (
-              <span className="shrink-0 text-xs text-text-muted">
+              <span className="hidden shrink-0 text-xs text-text-muted md:inline">
                 {article.pageCount} 页
               </span>
             )}
             {article.wordCount != null && (
-              <span className="shrink-0 text-xs text-text-muted">
+              <span className="hidden shrink-0 text-xs text-text-muted md:inline">
                 {article.wordCount} 字
               </span>
             )}
           </>
         ) : (
-          <h1 className="truncate text-lg font-semibold">
+          <h1 className="hidden truncate text-lg font-semibold md:block">
             {STATIC_TITLES[pathname] ?? ''}
           </h1>
         )}

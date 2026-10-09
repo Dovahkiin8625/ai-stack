@@ -169,7 +169,7 @@ export default function CategoryPage() {
       {selectedResource ? (
         <>
           <div className={`flex-1 overflow-hidden transition-[padding] duration-200 ${
-            panelOpen ? 'pr-[336px]' : ''
+            panelOpen ? 'md:pr-[336px]' : ''
           }`}>
             {resourceContent ? (
               <div className="h-full w-full transition-all duration-200">
