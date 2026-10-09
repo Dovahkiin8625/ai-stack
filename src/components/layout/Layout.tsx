@@ -1,6 +1,7 @@
 import { Outlet } from 'react-router-dom';
 import Sidebar from './Sidebar';
 import Topbar from './Topbar';
+import SyncStatusBar from '../sync/SyncStatusBar';
 
 export default function Layout() {
   return (
@@ -8,6 +9,7 @@ export default function Layout() {
       <Sidebar />
       <div className="relative flex min-w-0 flex-1 flex-col">
         <Topbar />
+        <SyncStatusBar />
         <main className="flex-1 overflow-auto">
           <Outlet />
         </main>

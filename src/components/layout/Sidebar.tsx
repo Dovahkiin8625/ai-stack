@@ -4,7 +4,7 @@ import {
   BookOpen, Layers, MessageSquareText, Eye, Languages, Mic,
   Wrench, Bot, Shield, Sparkles, Package, TrendingUp,
   ChevronRight, ChevronDown,
-  FileText, FileType, Presentation, RefreshCw,
+  FileText, FileType, Presentation, RefreshCw, CloudDownload,
 } from 'lucide-react';
 import type { ComponentType } from 'react';
 import { iconForCategoryPath, type LucideIconName } from '../../data/categories';
@@ -232,6 +232,15 @@ export default function Sidebar() {
                                       >
                                         {AIcon && <AIcon size={12} />}
                                         <span className="truncate">{r.title}</span>
+                                        {/* 未缓存角标：紧跟标题右侧；affordance 而非 alarm —— 后端
+                                            read_resource 会自动下载，点开照样能读。 */}
+                                        {!r.present && (
+                                          <CloudDownload
+                                            size={10}
+                                            className="shrink-0 text-text-muted"
+                                            aria-label="未缓存"
+                                          />
+                                        )}
                                       </NavLink>
                                     </li>
                                   );

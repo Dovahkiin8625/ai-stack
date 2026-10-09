@@ -28,11 +28,18 @@ export default function App() {
   useEffect(() => {
     // 启动序列（顺序 await，避免两者并发时 cache 覆盖刚跑完的 scan 结果）：
     // 1. 立刻从 DB 读分类缓存 —— 后续启动此时侧栏即可渲染（不再阻塞扫描）
-    // 2. 后台跑一次扫描，更新新增/删除/变动的资源
-    // 首次启动（DB 空）loadCachedCategories 是 no-op，scan() 跑完后列表照常出现。
+    // 2. syncNow：拉远端 manifest 并落库；落库成功时内部已 scan(false)，返回 true
+    // 3. 仅当 syncNow 返回 false（后端 skipped 或抛错）时才自己再 scan(false) 一次
+    //    —— 避免"syncNow 内 + 启动序列"走两遍（一旦 walk 380 个文件，那个耗时很显著）
+    // 4. refreshSyncStatus：拉 present/total 给顶部状态条
+    //
+    // 首次启动（DB 空）loadCachedCategories 是 no-op，syncNow skipped 或抛错，
+    // scan() 兜底跑完后列表照常出现。
     void (async () => {
       await loadCachedCategories();
-      await scan(false);
+      const synced = await useLibraryStore.getState().syncNow();
+      if (!synced) await scan(false);
+      await useLibraryStore.getState().refreshSyncStatus();
     })();
   }, [scan, loadCachedCategories]);
 
