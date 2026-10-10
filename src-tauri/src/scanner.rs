@@ -262,12 +262,12 @@ pub fn validate_root(root: &Path) -> Result<()> {
     Ok(())
 }
 
-fn parse_sort_order(p: &str) -> i64 {
+pub fn parse_sort_order(p: &str) -> i64 {
     // 第一段若为两位数字，解析为排序号；否则 9999（保证未编号目录排到末尾）
     p.split('/').next().and_then(|s| s.parse::<i64>().ok()).unwrap_or(9999)
 }
 
-fn parent_of(path: &str) -> Option<String> {
+pub fn parent_of(path: &str) -> Option<String> {
     let mut parts: Vec<&str> = path.split('/').collect();
     if parts.len() <= 1 {
         return None;
@@ -276,7 +276,7 @@ fn parent_of(path: &str) -> Option<String> {
     Some(parts.join("/"))
 }
 
-fn humanize_dir_name(path: &str) -> String {
+pub fn humanize_dir_name(path: &str) -> String {
     path.rsplit('/')
         .next()
         .unwrap_or(path)

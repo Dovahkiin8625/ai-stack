@@ -1,7 +1,7 @@
 import { useEffect, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import ReactMarkdown from 'react-markdown';
-import { FileText, BookOpen, FileType, Presentation, AlertTriangle } from 'lucide-react';
+import { FileText, BookOpen, FileType, Presentation, AlertTriangle, CloudDownload } from 'lucide-react';
 import type { ComponentType } from 'react';
 import type {
   Resource,
@@ -302,11 +302,16 @@ function EntryLink({
   return (
     <Link
       to={`${linkBase}/${resource.id}`}
-      className="block px-4 py-2.5 transition-colors hover:bg-surface-2"
+      className="block px-4 py-2.5 transition-colors hover:bg-surface-2 active:bg-surface-2/70"
     >
       <div className="flex items-center gap-3 text-sm">
         {Icon && <Icon size={16} className="shrink-0 text-text-muted" />}
         <span className="flex-1 truncate text-text">{entry.title || resource.title}</span>
+        {/* 未缓存角标：affordance 而非 alarm —— 后端 read_resource 会自动下载，
+            点开照样能读；这里只是提示"首次打开时会现拉一次"。 */}
+        {!resource.present && (
+          <CloudDownload size={12} className="shrink-0 text-text-muted" aria-label="未缓存" />
+        )}
         <span className="shrink-0 text-xs text-text-muted">{formatMeta(resource)}</span>
       </div>
       {entry.description && (
@@ -363,11 +368,15 @@ function UnlistedGroup({
             <li key={r.id}>
               <Link
                 to={`${linkBase}/${r.id}`}
-                className="block px-4 py-2.5 transition-colors hover:bg-surface-2"
+                className="block px-4 py-2.5 transition-colors hover:bg-surface-2 active:bg-surface-2/70"
               >
                 <div className="flex items-center gap-3 text-sm">
                   {Icon && <Icon size={16} className="shrink-0 text-text-muted" />}
                   <span className="flex-1 truncate text-text">{r.title}</span>
+                  {/* 未缓存角标：与 EntryLink 保持一致 —— 后端 auto-download on read。 */}
+                  {!r.present && (
+                    <CloudDownload size={12} className="shrink-0 text-text-muted" aria-label="未缓存" />
+                  )}
                   <span className="shrink-0 text-xs text-text-muted">{formatMeta(r)}</span>
                 </div>
               </Link>

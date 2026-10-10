@@ -1,11 +1,13 @@
 import { create } from 'zustand';
 import * as api from '../lib/library-api';
+import * as sync from '../lib/sync';
 import type {
   Category,
   Resource,
   ResourceContent,
   ScanSummary,
   SubcategoryIndex,
+  SyncStatus,
 } from '../types';
 
 interface LibraryState {
@@ -29,6 +31,20 @@ interface LibraryState {
    */
   indexByPath: Record<string, SubcategoryIndex | null>;
   error?: string;
+  // ---- 同步状态 ----
+  /**
+   * 后端 sync_status 拉到的统计；null = 还没拉过（冷启动）。
+   * 拉失败时保留上次值（refreshSyncStatus 静默吞错），不阻塞 UI。
+   */
+  syncStatus: SyncStatus | null;
+  /**
+   * 同步阶段机。**与 status 解耦** —— library.status 表示"本地扫描"状态，
+   * syncPhase 表示"远端同步"状态；改 syncPhase 不能影响 status，避免破坏
+   * 首次启动"status=idle / 空 categories"的冷启动外观（与"扫描中"视觉一致）。
+   */
+  syncPhase: 'idle' | 'manifest' | 'downloading' | 'error';
+  /** download_all 的最新进度；downloadAll 完成或被重置时清 null。 */
+  downloadProgress: { done: number; total: number } | null;
   scan: (force?: boolean) => Promise<void>;
   /**
    * 启动时立刻从 DB 读分类缓存 —— 不阻塞在扫描上，让侧栏在第一次扫描跑之前就能渲染。
@@ -48,6 +64,31 @@ interface LibraryState {
    */
   updateResourceContent: (content: ResourceContent) => void;
   reset: () => void;
+  // ---- 同步 actions ----
+  /**
+   * 拉远端 manifest 并落库。返回 Promise<boolean>：
+   * - true  = 后端实际落了库（manifest 拿到了新条目），库已被内部 scan(false) 重建
+   * - false = 后端报告 skipped（没配 base_url，纯本地模式）或抛错，**库未被重建**
+   *
+   * 启动序列据此决定要不要自己再扫一次：`if (!synced) await scan(false)`，
+   * 避免"syncNow 内已扫 + 启动序列又扫一次"走两遍 walk。
+   *
+   * 错误处理故意只动 syncPhase / 共享 error 字段，**不动 status**——
+   * status 是"本地扫描"状态机；syncNow 失败不该把冷启动的 `idle` 推到 error，
+   * 否则用户首启看到红色空框。把这个不变量记进 reset 与每个 action。
+   */
+  syncNow: () => Promise<boolean>;
+  /**
+   * 单独拉一次 sync_status 写进 store。失败静默吞掉 —— 状态条是增强信息，
+   * 拉不到就保持上次的值（或 null），不能让用户看到红条。
+   */
+  refreshSyncStatus: () => Promise<void>;
+  /**
+   * 触发后端 download_all。**进度通过 sync_progress 事件回传**，需要 UI 层在
+   * mount 时 listen onSyncProgress 并写回 store.downloadProgress（这一步不在本 action 里）。
+   * 本 action 只翻 syncPhase + 设初始 downloadProgress，监听责任分离避免循环依赖。
+   */
+  downloadAll: () => Promise<void>;
 }
 
 // 单调递增的"selectResource 调用序号"。每次调用自增；调用返回时
@@ -63,6 +104,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
   loadingResource: false,
   articlesByPath: {},
   indexByPath: {},
+  syncStatus: null,
+  syncPhase: 'idle',
+  downloadProgress: null,
 
   scan: async (force = false) => {
     set({ status: 'scanning', error: undefined });
@@ -168,6 +212,63 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     set({ resourceContent: content });
   },
 
+  // ---- 同步 actions ----
+
+  refreshSyncStatus: async () => {
+    try {
+      const s = await sync.syncStatus();
+      set({ syncStatus: s });
+    } catch {
+      // 状态条是增强信息，拉不到就静默隐藏 —— 不抛到 error 字段，
+      // 否则 UI 会出现"状态条红框"吓用户一跳。保留上次的 syncStatus（若有）。
+    }
+  },
+
+  syncNow: async (): Promise<boolean> => {
+    set({ syncPhase: 'manifest' });
+    try {
+      const r = await sync.syncManifest();
+      if (r.skipped) {
+        // 后端报告"未配置 base_url" —— 没拉到 manifest，DB 也没变化，
+        // 没必要触发 scan；让 caller（启动序列）自己决定要不要扫。
+        // 不动 status，保留冷启动外观。
+        set({ syncPhase: 'idle' });
+        return false;
+      }
+      // 拉到新条目并已落库 —— 重新 scan 让本地已有文件标 present=1。
+      // 这一步是 RULING 1 的关键：synced 路径下库由 syncNow 自己重建，
+      // caller 不应该再扫一次。
+      await get().scan(false);
+      // 内部刷一次 status：syncNow 有两个 caller（启动序列 + SyncForm），
+      // 让"sync 成功"必然伴随最新统计是这两个 caller 的共同契约；caller 不必
+      // 自己再调 refreshSyncStatus，App.tsx 启动序列因此可以省掉重复的 IPC。
+      await get().refreshSyncStatus();
+      set({ syncPhase: 'idle' });
+      return true;
+    } catch (e) {
+      // 错误只动 syncPhase / error。**不动 status** —— 否则冷启动 `idle` 被推到
+      // `error`，UI 会渲染红色错误框（首次启动 DB 空 ≠ 错误）。
+      set({ syncPhase: 'error', error: String(e) });
+      return false;
+    }
+  },
+
+  downloadAll: async () => {
+    // 设 downloadProgress 为 (0, 0) 而不是 null：UI 据此区分"已开始但还没进度"
+    // 与"还没开始"。sync_progress 第一个事件到来时直接替换 `done`。
+    set({
+      syncPhase: 'downloading',
+      downloadProgress: { done: 0, total: 0 },
+    });
+    try {
+      await sync.downloadAll();
+      // 后端 fire-and-forget 后立刻返回 —— sync_phase 在 sync_progress 终事件
+      // 到位时再翻回 idle（由 UI 层监听事件后切）。这里不动 syncPhase。
+    } catch (e) {
+      set({ syncPhase: 'error', error: String(e) });
+    }
+  },
+
   reset: () => set({
     status: 'idle',
     summary: undefined,
@@ -178,5 +279,9 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
     articlesByPath: {},
     indexByPath: {},
     error: undefined,
+    // 同步字段同样重置 —— 不重置会让"上一个会话/上一个账号"的同步状态泄漏到下次启动。
+    syncStatus: null,
+    syncPhase: 'idle',
+    downloadProgress: null,
   }),
 }));

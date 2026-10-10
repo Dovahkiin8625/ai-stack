@@ -1,13 +1,17 @@
 {
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "default",
-  "description": "默认权限",
+  "description": "默认权限（移动端；桌面专属权限见 capabilities/desktop.json）",
   "windows": ["main"],
+  "platforms": ["android", "iOS"],
   "permissions": [
     "core:default",
     "store:default",
-    "window-state:default",
     "fs:default",
+    {
+      "identifier": "fs:allow-read-file",
+      "allow": [{ "path": "$RESOURCE/**" }]
+    },
     "dialog:default",
     "sql:default"
   ]

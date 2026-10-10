@@ -2,12 +2,13 @@
 use crate::db::{Db, NoteRow, ResourceRow};
 use crate::reader::{self, ResourceContent};
 use crate::scanner::{self, ScanConfig, ScanSummary};
+use crate::sync::{Fetcher, HttpFetcher, Manifest, PendingFile};
 use anyhow::{Context, Result};
 use once_cell::sync::Lazy;
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex};
 use tauri::{AppHandle, Emitter, Manager};
 
 /// 跨命令共享的不可变路径配置。
@@ -15,6 +16,11 @@ use tauri::{AppHandle, Emitter, Manager};
 pub struct AppState {
     pub db_path: PathBuf,
     pub knowledge_root: PathBuf,
+    /// 共享的 HTTP fetcher。setup() 在没有 tokio runtime 的主线程上构造一次，
+    /// 命令层 clone Arc 后放到 std::thread::spawn 派生线程上用 —— 绝不能在 tokio
+    /// worker 线程上调用其 get()，否则 reqwest::blocking 与 tokio reactor 互斥会 panic。
+    /// 测试场景下传 None，命中 base_url 为空路径时不接触 fetcher。
+    pub http_fetcher: Option<Arc<HttpFetcher>>,
 }
 
 fn ensure_db_dir(p: &PathBuf) {
@@ -55,6 +61,9 @@ pub struct ResourceDto {
     pub indexed_at: String,
     pub page_count: Option<i64>,
     pub word_count: Option<i64>,
+    /// 文件是否已缓存到本地。前端据此显示「下载」/「已下载」徽标，
+    /// 替代早期版本的「根据 path 是否存在推断」做法。
+    pub present: bool,
 }
 
 impl From<ResourceRow> for ResourceDto {
@@ -69,6 +78,7 @@ impl From<ResourceRow> for ResourceDto {
             indexed_at: r.indexed_at,
             page_count: r.page_count,
             word_count: r.word_count,
+            present: r.present,
         }
     }
 }
@@ -199,19 +209,33 @@ pub fn list_resources(
 }
 
 #[tauri::command]
-pub fn read_resource(id: i64, app: AppHandle) -> Result<ResourceContent, String> {
+pub async fn read_resource(id: i64, app: AppHandle) -> Result<ResourceContent, String> {
+    // 必须异步：ensure_cached 在文件缺失时可能走同步 HTTP 下载，绝对不能在
+    // Tauri 命令线程（=tokio runtime 线程）上跑 —— reqwest::blocking 会 panic。
+    // 派生 std::thread 跑全部工作（DB 查询 + 补齐 + 读文件），oneshot 把结果
+    // 桥回 async 上下文，UI 不冻结。
     let state: tauri::State<AppState> = app.state();
-    let db = Db::open(&state.db_path).map_err(|e| e.to_string())?;
-    let (category_path, rel_path, kind) = db
-        .conn
-        .query_row(
-            "SELECT category_path, rel_path, type FROM resources WHERE id = ?1",
-            [id],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
-        )
-        .map_err(|e| format!("resource {id} not found: {e}"))?;
-    let abs = reader::resolve_absolute(&state.knowledge_root, &category_path, &rel_path);
-    reader::read(&abs, &kind).map_err(|e| format!("read {}: {e:#}", abs.display()))
+    let db_path = state.db_path.clone();
+    let knowledge_root = state.knowledge_root.clone();
+    let http_fetcher = state.http_fetcher.clone();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let result = (|| -> anyhow::Result<ResourceContent> {
+            let db = Db::open(&db_path).context("open db")?;
+            let (category_path, rel_path, kind) = lookup_resource_path_kind(&db, id)?;
+            let local_state = AppState {
+                db_path: db_path.clone(),
+                knowledge_root: knowledge_root.clone(),
+                http_fetcher: http_fetcher.clone(),
+            };
+            ensure_cached(&local_state, &db, id, &category_path, &rel_path)
+                .map_err(|e| anyhow::anyhow!("{e:#}"))?;
+            let abs = reader::resolve_absolute(&knowledge_root, &category_path, &rel_path);
+            reader::read(&abs, &kind).map_err(|e| anyhow::anyhow!("read {}: {e:#}", abs.display()))
+        })();
+        let _ = tx.send(result.map_err(|e| e.to_string()));
+    });
+    rx.await.map_err(|e| format!("download worker join: {e}"))?
 }
 
 /// 编辑模式的核心 helper：把新 markdown 写回文件 → 重新过 markdown_extract 拿新
@@ -249,15 +273,11 @@ pub fn write_resource(
 ) -> Result<ResourceContent, String> {
     let state: tauri::State<AppState> = app.state();
     let db = Db::open(&state.db_path).map_err(|e| e.to_string())?;
-    // 复用 read_resource 的查 path + kind 逻辑：把 kind/路径 一次拿出来
-    let (category_path, rel_path, kind) = db
-        .conn
-        .query_row(
-            "SELECT category_path, rel_path, type FROM resources WHERE id = ?1",
-            [id],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
-        )
-        .map_err(|e| format!("resource {id} not found: {e}"))?;
+    // 复用 read_resource 的查 path + kind 逻辑：把 kind/路径 一次拿出来。
+    // 走 lookup_resource_path_kind 让"找不到"错误也走中文 + 操作指引路径，
+    // 否则用户编辑一篇文章时同步把它清掉，会看到英文 + 原始 rusqlite 字符串。
+    let (category_path, rel_path, kind) =
+        lookup_resource_path_kind(&db, id).map_err(|e| format!("{e:#}"))?;
     if kind != "markdown" {
         return Err(format!(
             "write_resource 仅支持 markdown 资源，resource {id} 是 {kind}"
@@ -281,25 +301,36 @@ pub fn write_resource(
 /// - PPTX：前端 pptxviewjs 把 pptx → canvas slide（按 slide 翻页，完整保留版式）
 ///
 /// markdown reader 不走这里（后端已经返回 html）。
+///
+/// 与 read_resource 同源考量：转 async，把潜在的网络下载放到 std::thread 上，
+/// 避免 Tauri tokio runtime 线程与 reqwest::blocking reactor 互斥而 panic。
 #[tauri::command]
-pub fn read_resource_bytes(id: i64, app: AppHandle) -> Result<Vec<u8>, String> {
+pub async fn read_resource_bytes(id: i64, app: AppHandle) -> Result<Vec<u8>, String> {
     let state: tauri::State<AppState> = app.state();
-    let db = Db::open(&state.db_path).map_err(|e| e.to_string())?;
-    let (category_path, rel_path, kind) = db
-        .conn
-        .query_row(
-            "SELECT category_path, rel_path, type FROM resources WHERE id = ?1",
-            [id],
-            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
-        )
-        .map_err(|e| format!("resource {id} not found: {e}"))?;
-    if !matches!(kind.as_str(), "pdf" | "docx" | "pptx") {
-        return Err(format!(
-            "read_resource_bytes 仅支持 PDF/DOCX/PPTX，resource {id} 是 {kind}"
-        ));
-    }
-    let abs = reader::resolve_absolute(&state.knowledge_root, &category_path, &rel_path);
-    std::fs::read(&abs).map_err(|e| format!("read {}: {e}", abs.display()))
+    let db_path = state.db_path.clone();
+    let knowledge_root = state.knowledge_root.clone();
+    let http_fetcher = state.http_fetcher.clone();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let result = (|| -> anyhow::Result<Vec<u8>> {
+            let db = Db::open(&db_path).context("open db")?;
+            let (category_path, rel_path, kind) = lookup_resource_path_kind(&db, id)?;
+            if !matches!(kind.as_str(), "pdf" | "docx" | "pptx") {
+                anyhow::bail!("read_resource_bytes 仅支持 PDF/DOCX/PPTX，resource {id} 是 {kind}");
+            }
+            let local_state = AppState {
+                db_path: db_path.clone(),
+                knowledge_root: knowledge_root.clone(),
+                http_fetcher: http_fetcher.clone(),
+            };
+            ensure_cached(&local_state, &db, id, &category_path, &rel_path)
+                .map_err(|e| anyhow::anyhow!("{e:#}"))?;
+            let abs = reader::resolve_absolute(&knowledge_root, &category_path, &rel_path);
+            std::fs::read(&abs).map_err(|e| anyhow::anyhow!("read {}: {e}", abs.display()))
+        })();
+        let _ = tx.send(result.map_err(|e| e.to_string()));
+    });
+    rx.await.map_err(|e| format!("download worker join: {e}"))?
 }
 
 /// 读取子分类目录下的 `_index.md` 并解析为 `[{ relPath, title, description }]`。
@@ -307,16 +338,488 @@ pub fn read_resource_bytes(id: i64, app: AppHandle) -> Result<Vec<u8>, String> {
 /// 给中间区目录列表的"每行附带描述"用。
 /// 不入库（编辑 `_index.md` 不必触发重扫），每次调用现读现解析，路径 1KB 内的文件
 /// 解析开销可以忽略；前端按 categoryPath 在 store 里缓存。
+///
+/// 异步实现：文件缺失时若 manifest 标记了 `_index.md` 且配置了 base_url，
+/// 会从远端补齐；该 HTTP 下载必须在 std::thread 上跑以避开 tokio runtime。
+/// 即使 base_url 缺失 / index_files 缺记录 / 下载失败，原 `parse_file` 仍走原本
+/// 的"目录缺少 _index.md"错误路径，前端据此渲染提示 —— 不把网络失败变成硬错误。
 #[tauri::command]
-pub fn read_subcategory_index(
+pub async fn read_subcategory_index(
     category_path: String,
     app: AppHandle,
 ) -> Result<crate::readers::index_md::ParsedIndex, String> {
     let state: tauri::State<AppState> = app.state();
-    // _index.md 在该子分类目录下，文件名固定。
-    let abs = state.knowledge_root.join(&category_path).join("_index.md");
-    crate::readers::index_md_parse_file(&abs)
-        .map_err(|e| format!("parse _index.md for {category_path}: {e:#}"))
+    let db_path = state.db_path.clone();
+    let knowledge_root = state.knowledge_root.clone();
+    let http_fetcher = state.http_fetcher.clone();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let result = (|| -> anyhow::Result<crate::readers::index_md::ParsedIndex> {
+            // _index.md 在该子分类目录下，文件名固定。
+            let abs = knowledge_root.join(&category_path).join("_index.md");
+            if !abs.is_file() {
+                // 打开 DB 查 index_files：仅当 manifest 标记了此 index 且未 present 时才尝试下载。
+                let db = Db::open(&db_path).context("open db for index lookup")?;
+                let index_path = format!("{category_path}/_index.md");
+                if let Some((size, present)) = db.index_file(&index_path)? {
+                    if !present {
+                        let base_url = db
+                            .get_config("sync_base_url")?
+                            .unwrap_or_default();
+                        if !base_url.trim().is_empty() {
+                            if let Some((cat, rel)) = index_path
+                                .split_once('/')
+                                .map(|(a, b)| (a.to_string(), b.to_string()))
+                            {
+                                let local_state = AppState {
+                                    db_path: db_path.clone(),
+                                    knowledge_root: knowledge_root.clone(),
+                                    http_fetcher: http_fetcher.clone(),
+                                };
+                                let entry = PendingFile {
+                                    category_path: cat,
+                                    rel_path: rel,
+                                    size,
+                                };
+                                // 下载失败也吞掉 —— 仍让 parse_file 返回原来的
+                                // "目录缺少 _index.md" 错误，前端据此提示用户。
+                                if ensure_index_file(
+                                    &local_state,
+                                    &entry,
+                                    &base_url,
+                                )
+                                .is_ok()
+                                    && abs.is_file()
+                                {
+                                    db.mark_index_present(&index_path)?;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            crate::readers::index_md_parse_file(&abs)
+                .map_err(|e| anyhow::anyhow!("parse _index.md for {category_path}: {e:#}"))
+        })();
+        let _ = tx.send(result);
+    });
+    rx.await
+        .map_err(|e| format!("index download worker join: {e}"))?
+        .map_err(|e| format!("{e:#}"))
+}
+
+// === Task 4: 同步命令族 ===
+
+/// DB 里 `present=0` 的远端条目 —— 待下载队列。
+/// 仅看 manifest 管理的行（remote_hash IS NOT NULL）；纯本地行不会出现在这里。
+pub fn pending_rows(db: &Db) -> Result<Vec<PendingFile>> {
+    let mut stmt = db.conn.prepare(
+        "SELECT category_path, rel_path, size_bytes FROM resources
+         WHERE remote_hash IS NOT NULL AND present = 0",
+    )?;
+    let rows = stmt
+        .query_map([], |r| {
+            Ok(PendingFile {
+                category_path: r.get(0)?,
+                rel_path: r.get(1)?,
+                size: r.get::<_, i64>(2)?.max(0) as u64,
+            })
+        })?
+        .collect::<rusqlite::Result<Vec<_>>>()?;
+    Ok(rows)
+}
+
+/// manifest 落库后把本地已经存在的文件标成 present=1
+/// （用户可能在同步前就手动下载过；manifest 接管后也得反映"实际可用"状态）。
+/// 同时清掉 manifest 已经不再列出的远端条目（`drop_resources_absent_from_manifest`）。
+pub fn apply_manifest(db: &Db, knowledge_root: &Path, manifest: &Manifest) -> Result<()> {
+    db.upsert_manifest(&manifest.files)?;
+    db.upsert_index_files(&manifest.indexes)?;
+    let keep: Vec<(String, String)> = manifest
+        .files
+        .iter()
+        .filter_map(|f| crate::sync::split_category(&f.path))
+        .collect();
+    db.drop_resources_absent_from_manifest(&keep)?;
+    for f in &manifest.files {
+        let Some((cat, rel)) = crate::sync::split_category(&f.path) else {
+            continue;
+        };
+        let abs = reader::resolve_absolute(knowledge_root, &cat, &rel);
+        if std::fs::metadata(&abs)
+            .map(|m| m.len() == f.size)
+            .unwrap_or(false)
+        {
+            db.mark_resource_present(&cat, &rel)?;
+        }
+    }
+    for f in &manifest.indexes {
+        if std::fs::metadata(knowledge_root.join(&f.path))
+            .map(|m| m.len() == f.size)
+            .unwrap_or(false)
+        {
+            db.mark_index_present(&f.path)?;
+        }
+    }
+    Ok(())
+}
+
+/// DB 查 资源的 (目录路径, 文件名, 类型)，找不到时返回**用户可读**的中文错误，
+/// 不把 `rusqlite::Error::QueryReturnedNoRows` 的 `"Query returned no rows"` 原文
+/// 透出到 UI —— 那是 RULING D 明令禁止的内部 jargon。
+///
+/// 抽出这个 helper 是为了：
+/// 1. 三处调用（read_resource / read_resource_bytes / download_resource）共享
+///    一份错误文案，避免日后再出现"某条路径漏改"的回归。
+/// 2. 单测可以裸用 `&Db` 直接断言错误文本，不依赖 AppHandle。
+pub fn lookup_resource_path_kind(
+    db: &Db,
+    id: i64,
+) -> Result<(String, String, String)> {
+    db.conn
+        .query_row(
+            "SELECT category_path, rel_path, type FROM resources WHERE id = ?1",
+            [id],
+            |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, String>(2)?)),
+        )
+        .map_err(|e| resource_lookup_error(e, id, false))
+}
+
+/// 同上，但 select 的是 size_bytes（供 download_resource 走 HTTP 时用）。
+pub fn lookup_resource_for_download(
+    db: &Db,
+    id: i64,
+) -> Result<(String, String, i64)> {
+    db.conn
+        .query_row(
+            "SELECT category_path, rel_path, size_bytes FROM resources WHERE id = ?1",
+            [id],
+            |r| Ok((
+                r.get::<_, String>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, i64>(2)?,
+            )),
+        )
+        .map_err(|e| resource_lookup_error(e, id, true))
+}
+
+/// 资源查表错误的统一翻译：找不到行 → 告诉用户去刷新；其它 → 套一层中文前缀
+/// "读取知识库失败，请稍后重试"，再附上原始 Display —— 便于前端或后端日志排查
+/// 时能看到底层错误，但**不会**让用户第一眼看到 raw SQL（"Query returned no
+/// rows" / "database is locked" 等），也不会被错误地当成"资源不存在"提示。
+fn resource_lookup_error(e: rusqlite::Error, id: i64, for_download: bool) -> anyhow::Error {
+    match e {
+        rusqlite::Error::QueryReturnedNoRows => {
+            if for_download {
+                anyhow::anyhow!(
+                    "文章 id={id} 已不在知识库中（可能同步时被清掉），无法下载 —— 请返回列表刷新"
+                )
+            } else {
+                anyhow::anyhow!(
+                    "文章 id={id} 已不在知识库中（可能同步时被清掉），请返回列表刷新"
+                )
+            }
+        }
+        other => anyhow::anyhow!("读取知识库失败，请稍后重试：{other}"),
+    }
+}
+
+/// `_index.md` 按需下载 —— 与 resources 共用 ensure_local_at，但 index_files 没有
+/// `category_path` / `rel_path` 拆分（path 直接是分类相对路径），手工拼一下条目。
+/// 失败时让上层静默忽略 —— 仍然走 "目录缺少 _index.md" 错误路径。
+fn ensure_index_file(state: &AppState, entry: &PendingFile, base_url: &str) -> Result<()> {
+    let fetcher = state
+        .http_fetcher
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("HTTP fetcher 未初始化"))?;
+    crate::sync::ensure_local_at(&state.knowledge_root, entry, base_url, fetcher.as_ref())
+}
+
+/// 文件本地缺失时自动从远端补齐再读。命中缓存或纯本地模式（无 base_url）时静默返回。
+///
+/// **必须从非 tokio runtime 线程调用**：内部使用共享的 `HttpFetcher`，而
+/// reqwest::blocking 与 tokio reactor 互斥。async 命令的派生线程是 std::thread，
+/// 满足该约束。
+///
+/// **错误信息必须是可读的中文**：用户在无网络下点开未缓存文章时，不能看到
+/// "resource not found" 这种天书。`Review Focus #1` 单测钉死这条契约。
+pub fn ensure_cached(
+    state: &AppState,
+    db: &Db,
+    id: i64,
+    category_path: &str,
+    rel_path: &str,
+) -> Result<()> {
+    let abs = reader::resolve_absolute(&state.knowledge_root, category_path, rel_path);
+    let size: i64 = db.conn.query_row(
+        "SELECT size_bytes FROM resources WHERE id = ?1",
+        [id],
+        |r| r.get(0),
+    )?;
+    if std::fs::metadata(&abs)
+        .map(|m| m.len() as i64 == size)
+        .unwrap_or(false)
+    {
+        return Ok(());
+    }
+    let base_url = db.get_config("sync_base_url")?.unwrap_or_default();
+    if base_url.trim().is_empty() {
+        anyhow::bail!(
+            "「{rel_path}」尚未缓存到本机，且未配置知识库同步地址（设置 → 知识库同步）"
+        );
+    }
+    let fetcher = state
+        .http_fetcher
+        .as_ref()
+        .ok_or_else(|| anyhow::anyhow!("HTTP fetcher 未初始化"))?;
+    crate::sync::ensure_local_at(
+        &state.knowledge_root,
+        &PendingFile {
+            category_path: category_path.to_string(),
+            rel_path: rel_path.to_string(),
+            size: size.max(0) as u64,
+        },
+        &base_url,
+        fetcher.as_ref(),
+    )?;
+    db.mark_resource_present(category_path, rel_path)?;
+    Ok(())
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncStatusDto {
+    pub total: i64,
+    pub present: i64,
+    pub total_bytes: i64,
+    pub cached_bytes: i64,
+    /// 是否配置了远端地址 —— false 时前端不显示同步状态条。
+    pub configured: bool,
+}
+
+#[derive(Serialize, Clone)]
+#[serde(rename_all = "camelCase")]
+pub struct SyncManifestDto {
+    pub files: i64,
+    pub indexes: i64,
+    /// 纯本地模式（base_url 为空）时为 true，前端据此不显示同步状态条，
+    /// 但也不当成"失败"展示。
+    pub skipped: bool,
+}
+
+/// 用户在设置页改的同步源地址。写入 app_config 表，立刻可被下一次 sync_* 读到。
+#[tauri::command]
+pub fn set_sync_base_url(url: String, app: AppHandle) -> Result<(), String> {
+    let state: tauri::State<AppState> = app.state();
+    let db = Db::open(&state.db_path).map_err(|e| e.to_string())?;
+    db.set_config("sync_base_url", url.trim())
+        .map_err(|e| e.to_string())
+}
+
+/// 读取当前同步统计。纯 DB 操作，可走普通同步 Tauri 命令。
+#[tauri::command]
+pub fn sync_status(app: AppHandle) -> Result<SyncStatusDto, String> {
+    let state: tauri::State<AppState> = app.state();
+    let db = Db::open(&state.db_path).map_err(|e| e.to_string())?;
+    let st = db.sync_status().map_err(|e| e.to_string())?;
+    let configured = db
+        .get_config("sync_base_url")
+        .map_err(|e| e.to_string())?
+        .map(|s| !s.trim().is_empty())
+        .unwrap_or(false);
+    Ok(SyncStatusDto {
+        total: st.total,
+        present: st.present,
+        total_bytes: st.total_bytes,
+        cached_bytes: st.cached_bytes,
+        configured,
+    })
+}
+
+/// 拉远端 manifest.json → 解析 → 落库（upsert_manifest + upsert_index_files）。
+///
+/// 异步命令：fetch 部分用 std::thread 跑（HttpFetcher 不能在 tokio 上用）；
+/// apply_manifest 部分 DB/文件系统操作用 spawn_blocking 派到工作线程，
+/// 释放 tokio worker 给其它命令。
+#[tauri::command]
+pub async fn sync_manifest(app: AppHandle) -> Result<SyncManifestDto, String> {
+    let state: tauri::State<AppState> = app.state();
+    let db_path = state.db_path.clone();
+    let knowledge_root = state.knowledge_root.clone();
+    let http_fetcher = state.http_fetcher.clone();
+
+    // 1. 读 base_url —— 失败要可读（无配置 = 纯本地模式 = skipped）
+    let base_url = {
+        let db = Db::open(&db_path).map_err(|e| e.to_string())?;
+        db.get_config("sync_base_url")
+            .map_err(|e| e.to_string())?
+            .unwrap_or_default()
+    };
+    if base_url.trim().is_empty() {
+        // 纯本地模式（开发）不报错，静默跳过 —— 前端据此不显示状态条
+        return Ok(SyncManifestDto {
+            files: 0,
+            indexes: 0,
+            skipped: true,
+        });
+    }
+    let fetcher = http_fetcher
+        .as_ref()
+        .ok_or_else(|| "HTTP fetcher 未初始化，请重启应用".to_string())?;
+
+    // 2. 拉 manifest —— 必须 std::thread（不能在 tokio 上跑 reqwest::blocking）
+    let url = crate::sync::remote_url(&base_url, "manifest.json");
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    let fetcher_clone = fetcher.clone();
+    std::thread::spawn(move || {
+        let result: anyhow::Result<Manifest> = (|| {
+            let body = fetcher_clone
+                .get(&url)
+                .map_err(|e| anyhow::anyhow!("拉取 {url} 失败：{e}"))?;
+            let text = String::from_utf8(body)
+                .map_err(|e| anyhow::anyhow!("manifest 不是 UTF-8：{e}"))?;
+            crate::sync::parse_manifest(&text)
+                .map_err(|e| anyhow::anyhow!("manifest 解析失败：{e}"))
+        })();
+        let _ = tx.send(result);
+    });
+    let manifest = rx
+        .await
+        .map_err(|e| format!("manifest fetch worker join: {e}"))?
+        .map_err(|e| format!("{e:#}"))?;
+
+    // 3. 落库 —— DB + 文件大小比对，无网络，spawn_blocking 安全。
+    let manifest_for_thread = Manifest {
+        version: manifest.version.clone(),
+        files: manifest.files.clone(),
+        indexes: manifest.indexes.clone(),
+    };
+    tauri::async_runtime::spawn_blocking(move || -> anyhow::Result<()> {
+        let mut db = Db::open(&db_path)?;
+        db.migrate()?;
+        apply_manifest(&db, &knowledge_root, &manifest_for_thread)
+    })
+    .await
+    .map_err(|e| e.to_string())?
+    .map_err(|e| format!("apply manifest: {e:#}"))?;
+
+    Ok(SyncManifestDto {
+        files: manifest.files.len() as i64,
+        indexes: manifest.indexes.len() as i64,
+        skipped: false,
+    })
+}
+
+/// 显式下载单个资源（前端「下载」按钮触发）。
+/// 异步命令：网络下载不能阻塞 UI 线程；走 std::thread + oneshot。
+#[tauri::command]
+pub async fn download_resource(id: i64, app: AppHandle) -> Result<(), String> {
+    let state: tauri::State<AppState> = app.state();
+    let db_path = state.db_path.clone();
+    let knowledge_root = state.knowledge_root.clone();
+    let http_fetcher = state.http_fetcher.clone();
+    let (tx, rx) = tokio::sync::oneshot::channel();
+    std::thread::spawn(move || {
+        let result = (|| -> anyhow::Result<()> {
+            let db = Db::open(&db_path)?;
+            let (cat, rel, size) = lookup_resource_for_download(&db, id)?;
+            let base_url = db
+                .get_config("sync_base_url")?
+                .unwrap_or_default();
+            if base_url.trim().is_empty() {
+                anyhow::bail!("未配置知识库同步地址，无法下载「{rel}」（设置 → 知识库同步）");
+            }
+            let fetcher = http_fetcher
+                .as_ref()
+                .ok_or_else(|| anyhow::anyhow!("HTTP fetcher 未初始化"))?;
+            crate::sync::ensure_local_at(
+                &knowledge_root,
+                &PendingFile {
+                    category_path: cat,
+                    rel_path: rel.clone(),
+                    size: size.max(0) as u64,
+                },
+                &base_url,
+                fetcher.as_ref(),
+            )
+            .map_err(|e| anyhow::anyhow!("{e:#}"))?;
+            db.mark_resource_present_unchecked(id)?;
+            Ok(())
+        })();
+        let _ = tx.send(result.map_err(|e| e.to_string()));
+    });
+    rx.await.map_err(|e| format!("download worker join: {e}"))?
+}
+
+/// 后台跑批量下载，立即返回。进度通过 `sync_progress` 事件 emit：
+/// - payload `{"done": N, "total": M}`，N 是已完成数（含失败的）
+/// - 单个文件失败不中断整批（sync::download_all 内部已吞掉单条错误）
+///
+/// `std::thread::spawn` 而非 `spawn_blocking`：避免 reqwest::blocking 与
+/// tokio reactor 互斥而 panic。
+#[tauri::command]
+pub fn download_all(app: AppHandle) -> Result<(), String> {
+    let state: tauri::State<AppState> = app.state();
+    let db_path = state.db_path.clone();
+    let knowledge_root = state.knowledge_root.clone();
+    let http_fetcher = state.http_fetcher.clone();
+
+    // 1. 同步查 DB（要 pending_rows 列表，base_url 也同步读），Tauri 主线程上做没代价
+    let db = Db::open(&state.db_path).map_err(|e| e.to_string())?;
+    let base_url = db
+        .get_config("sync_base_url")
+        .map_err(|e| e.to_string())?
+        .unwrap_or_default();
+    if base_url.trim().is_empty() {
+        // 没配地址就别折腾了，前端可以据此提示
+        return Err("未配置知识库同步地址（设置 → 知识库同步）".into());
+    }
+    let pending = pending_rows(&db).map_err(|e| e.to_string())?;
+    if pending.is_empty() {
+        return Ok(());
+    }
+    let fetcher = http_fetcher
+        .clone()
+        .ok_or_else(|| "HTTP fetcher 未初始化，请重启应用".to_string())?;
+    let app_emit = app.clone();
+
+    // 2. 派生 std::thread 跑批量下载（不在 tokio 上，绝不会 panic）
+    std::thread::spawn(move || {
+        let result: anyhow::Result<()> = (|| {
+            crate::sync::download_all(
+                &knowledge_root,
+                &base_url,
+                pending,
+                fetcher,
+                &move |done, total| {
+                    let _ = app_emit.emit(
+                        "sync_progress",
+                        serde_json::json!({"done": done, "total": total}),
+                    );
+                },
+            )?;
+            // 下载完统一刷新 present 标记（失败的由 download_all 内部的
+            // ensure_local_at 自动保持 present=0）
+            let db = Db::open(&db_path)?;
+            mark_all_present(&db)
+        })();
+        if let Err(e) = result {
+            // 整批失败（如 fetcher 构造错误）至少要让前端收到终结事件，
+            // 避免 UI 进度条永远停在 (n-1, n)。
+            let _ = app.emit(
+                "sync_progress",
+                serde_json::json!({"done": 0, "total": 0, "error": format!("{e:#}")}),
+            );
+        }
+    });
+    Ok(())
+}
+
+fn mark_all_present(db: &Db) -> Result<()> {
+    for p in pending_rows(db)? {
+        db.mark_resource_present(&p.category_path, &p.rel_path)?;
+    }
+    Ok(())
 }
 
 #[tauri::command]
@@ -1131,102 +1634,43 @@ pub fn build_state(app: &AppHandle) -> AppState {
     let db_path = resolve_db_path(app);
     let cwd = std::env::current_dir().unwrap_or_default();
     // 开发时从 cwd 向上找；安装后 cwd 不可靠（通常是 System32），
-    // 回落到 tauri.conf.json 的 bundle.resources 打进去的 $RESOURCE/knowledge。
-    let bundled_root = app
+    // 回落到 app_data_dir/knowledge（旧版本曾用 $RESOURCE/knowledge，
+    // 知识库不再打进安装包后该分支随之删除 —— 见 platform::pick_knowledge_root）。
+    let mut app_data = app
         .path()
-        .resolve("knowledge", tauri::path::BaseDirectory::Resource)
-        .ok()
-        .filter(|p| p.is_dir());
-    let knowledge_root = pick_knowledge_root(
-        find_knowledge_root(&cwd),
-        bundled_root,
-        cwd.join("resources").join("knowledge"),
+        .app_data_dir()
+        .expect("app_data_dir resolvable");
+    app_data.push("knowledge");
+    let knowledge_root = crate::platform::pick_knowledge_root(
+        crate::platform::find_knowledge_root(&cwd),
+        app_data,
     );
+    // 与 build_state 的 brief 对齐：保证扫描器 / materialize_seed 启动时目录一定存在
+    std::fs::create_dir_all(&knowledge_root).ok();
+    // setup() 钩子在主线程上、Tauri 的 tokio runtime 启动之前同步执行 —— 这是构造
+    // HttpFetcher 的唯一安全时机（构造后共享给所有需要下载的命令）。失败仅记录日志，
+    // 让用户仍能在纯本地模式下使用 app（无 sync_base_url 时本来也用不上）。
+    let http_fetcher = match HttpFetcher::new() {
+        Ok(f) => Some(Arc::new(f)),
+        Err(e) => {
+            eprintln!("警告：初始化 HTTP fetcher 失败，同步下载功能将不可用：{e:#}");
+            None
+        }
+    };
     AppState {
         db_path,
         knowledge_root,
+        http_fetcher,
     }
-}
-
-/// 知识库根目录查找优先级：开发目录 > 安装包资源目录 > 兜底路径。
-fn pick_knowledge_root(
-    dev_root: Option<PathBuf>,
-    bundled_root: Option<PathBuf>,
-    fallback: PathBuf,
-) -> PathBuf {
-    dev_root.or(bundled_root).unwrap_or(fallback)
-}
-
-/// 从 `start` 向上查找 `resources/knowledge/` 目录。
-/// 解决 `cargo run`（cwd 在 src-tauri/）与 `tauri build`（cwd 在项目根）
-/// 工作目录不一致的问题。
-fn find_knowledge_root(start: &std::path::Path) -> Option<PathBuf> {
-    let mut cur: Option<&std::path::Path> = Some(start);
-    while let Some(p) = cur {
-        let candidate = p.join("resources").join("knowledge");
-        if candidate.is_dir() {
-            return Some(candidate);
-        }
-        cur = p.parent();
-    }
-    None
 }
 
 #[cfg(test)]
 mod tests {
     use super::{
-        build_qa_prompt, find_knowledge_root, model_supports_thinking, pick_knowledge_root,
-        AiChunkPayload, AiErrorPayload,
+        build_qa_prompt, model_supports_thinking, AiChunkPayload, AiErrorPayload, AppState,
     };
-    use std::path::PathBuf;
-
-    #[test]
-    fn pick_knowledge_root_prefers_dev_dir_over_bundled() {
-        // 开发时 cwd 向上能找到 knowledge/，应优先于安装包资源目录
-        let picked = pick_knowledge_root(
-            Some(PathBuf::from("/dev/resources/knowledge")),
-            Some(PathBuf::from("/installed/knowledge")),
-            PathBuf::from("/fallback"),
-        );
-        assert_eq!(picked, PathBuf::from("/dev/resources/knowledge"));
-    }
-
-    #[test]
-    fn pick_knowledge_root_falls_back_to_bundled_resources() {
-        // 安装后 cwd 找不到（cwd 通常是 System32），应回落到 $RESOURCE/knowledge
-        let picked = pick_knowledge_root(
-            None,
-            Some(PathBuf::from("/installed/knowledge")),
-            PathBuf::from("/fallback"),
-        );
-        assert_eq!(picked, PathBuf::from("/installed/knowledge"));
-    }
-
-    #[test]
-    fn pick_knowledge_root_uses_fallback_when_both_missing() {
-        let picked = pick_knowledge_root(None, None, PathBuf::from("/fallback/knowledge"));
-        assert_eq!(picked, PathBuf::from("/fallback/knowledge"));
-    }
-
-    #[test]
-    fn find_knowledge_root_walks_up_to_directory() {
-        // 在 tmp 下构造 project_root/src-tauri/，把 project_root/resources/knowledge/ 建出来
-        let tmp = tempfile::tempdir().unwrap();
-        let project_root = tmp.path();
-        let deep = project_root.join("src-tauri");
-        std::fs::create_dir_all(&deep).unwrap();
-        let knowledge = project_root.join("resources").join("knowledge");
-        std::fs::create_dir_all(&knowledge).unwrap();
-        // 从 src-tauri（cwd）开始查找，应向上找到 project_root/resources/knowledge
-        let found = find_knowledge_root(&deep).unwrap();
-        assert_eq!(found.canonicalize().unwrap(), knowledge.canonicalize().unwrap());
-    }
-
-    #[test]
-    fn find_knowledge_root_returns_none_when_missing() {
-        let tmp = tempfile::tempdir().unwrap();
-        assert!(find_knowledge_root(tmp.path()).is_none());
-    }
+    use crate::db::Db;
+    use crate::sync::{Manifest, ManifestFile};
 
     #[test]
     fn model_supports_thinking_only_for_claude_prefix() {
@@ -1328,5 +1772,158 @@ mod tests {
         let prompt = build_qa_prompt("  ", "  ", "  ", "  ", "  ");
         // 不抛错，输出非空即可
         assert!(!prompt.is_empty());
+    }
+
+    // ---- Task 4: sync helpers ----
+
+    fn tmp_db() -> (tempfile::TempDir, Db) {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut db = Db::open(&tmp.path().join("t.db")).unwrap();
+        db.migrate().unwrap();
+        (tmp, db)
+    }
+
+    #[test]
+    fn pending_rows_skip_present_files() {
+        let (_t, db) = tmp_db();
+        db.upsert_manifest(&[
+            ManifestFile { path: "a/x.md".into(), size: 10, sha256: None },
+            ManifestFile { path: "a/y.md".into(), size: 20, sha256: None },
+        ])
+        .unwrap();
+        db.mark_resource_present("a", "x.md").unwrap();
+        let rows = super::pending_rows(&db).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].rel_path, "y.md");
+        assert_eq!(rows[0].size, 20);
+    }
+
+    /// `remote_hash IS NOT NULL` 是 pending_rows 的硬过滤：纯本地行（开发者手动扔
+    /// 进 knowledge/ 的文件，没有 manifest 备份）绝对不能出现在下载队列里。
+    /// 没有这条断言的话，过滤写漏只剩 `present = 0` 也会通过 —— 因为
+    /// `upsert_manifest` 总是同时填 remote_hash，掩盖了过滤的真假。
+    ///
+    /// 关键：纯本地行必须 `present = 0`，否则 `present = 0` 这个 clause 也会排除它，
+    /// 测试就变成"在断言两条互不依赖的过滤"的假阳性 —— 删掉 `remote_hash` 子句
+    /// 仍然 GREEN。
+    #[test]
+    fn pending_rows_excludes_pure_local_rows() {
+        let (_t, db) = tmp_db();
+        db.upsert_manifest(&[
+            ManifestFile { path: "a/remote.md".into(), size: 10, sha256: None },
+        ])
+        .unwrap();
+        // 纯本地行：直接 upsert_resource，不走 manifest，remote_hash = NULL。
+        // upsert_resource 强制 present=1（它表达"已扫描到本地文件"），
+        // 这里显式把 present 翻成 0 —— 表达"还没拉到本地"的纯本地占位，
+        // 让 `remote_hash IS NOT NULL` 成为唯一的排除依据。
+        db.upsert_resource(crate::db::ResourceInput {
+            category_path: "a".into(),
+            rel_path: "local.md".into(),
+            r#type: "markdown".into(),
+            title: "local".into(),
+            size_bytes: 5,
+            mtime: 0,
+            page_count: None,
+            word_count: None,
+        })
+        .unwrap();
+        db.conn
+            .execute(
+                "UPDATE resources SET present = 0 WHERE category_path = 'a' AND rel_path = 'local.md'",
+                [],
+            )
+            .unwrap();
+        // 健全性自检：现在 local 行真的是 present=0 + remote_hash=NULL，
+        // 把 `remote_hash IS NOT NULL` 那条过滤删掉就会让 local 行通过。
+        let (present, remote_hash): (i64, Option<String>) = db
+            .conn
+            .query_row(
+                "SELECT present, remote_hash FROM resources WHERE rel_path='local.md'",
+                [],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .unwrap();
+        assert_eq!(present, 0, "测试夹具必须 present=0，否则无法单独验证 remote_hash 过滤");
+        assert!(
+            remote_hash.is_none(),
+            "测试夹具必须 remote_hash=NULL（纯本地行身份）"
+        );
+
+        let rows = super::pending_rows(&db).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].rel_path, "remote.md");
+    }
+
+    #[test]
+    fn apply_manifest_marks_downloaded_files_present() {
+        let (tmp, db) = tmp_db();
+        let root = tmp.path().join("knowledge");
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        std::fs::write(root.join("a/x.md"), b"12345").unwrap();
+        db.upsert_manifest(&[ManifestFile { path: "a/x.md".into(), size: 5, sha256: None }]).unwrap();
+        super::apply_manifest(&db, &root, &Manifest {
+            version: "v".into(),
+            files: vec![ManifestFile { path: "a/x.md".into(), size: 5, sha256: None }],
+            indexes: vec![],
+        }).unwrap();
+        let present: i64 = db.conn.query_row("SELECT present FROM resources", [], |r| r.get(0)).unwrap();
+        assert_eq!(present, 1);
+    }
+
+    /// Review Focus #1：无网络 / 未配置同步地址时点开未缓存文章，
+    /// 错误信息必须是能照着做的人话，而不是 "resource not found"。
+    #[test]
+    fn ensure_cached_without_base_url_gives_actionable_chinese_error() {
+        let (tmp, db) = tmp_db();
+        let root = tmp.path().join("knowledge");
+        std::fs::create_dir_all(root.join("a")).unwrap();
+        db.upsert_manifest(&[ManifestFile { path: "a/new.md".into(), size: 5, sha256: None }]).unwrap();
+        let id: i64 = db.conn.query_row("SELECT id FROM resources WHERE rel_path='new.md'", [], |r| r.get(0)).unwrap();
+        let state = AppState {
+            db_path: tmp.path().join("t.db"),
+            knowledge_root: root,
+            http_fetcher: None,
+        };
+        let err = super::ensure_cached(&state, &db, id, "a", "new.md").unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("尚未缓存"), "实际信息：{msg}");
+        assert!(msg.contains("同步地址"), "应告诉用户去哪里配置：{msg}");
+    }
+
+    /// Review Focus #1 的姊妹分支：文章已被 manifest 清掉（典型场景 —— 同步运行把
+    /// 行 drop 掉，但前端的列表是上一次 scan 的快照，用户点了已不存在的条目）。
+    /// 错误必须是中文 + 可操作，**绝不能**透出 rusqlite 的 "Query returned no rows"。
+    #[test]
+    fn lookup_resource_path_kind_missing_id_gives_actionable_chinese_error() {
+        let (_t, db) = tmp_db();
+        let err = super::lookup_resource_path_kind(&db, 9999).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(
+            msg.contains("已不在知识库中"),
+            "实际信息：{msg}"
+        );
+        assert!(
+            msg.contains("返回列表刷新"),
+            "应告诉用户去哪里操作：{msg}"
+        );
+        assert!(
+            !msg.contains("Query returned no rows"),
+            "绝不能把 rusqlite 内部错误原文透出来：{msg}"
+        );
+    }
+
+    /// download_resource 的「找不到」分支：消息措辞要带"无法下载"以匹配上下文，
+    /// 但同样不能透出 rusqlite 原文。
+    #[test]
+    fn lookup_resource_for_download_missing_id_gives_actionable_chinese_error() {
+        let (_t, db) = tmp_db();
+        let err = super::lookup_resource_for_download(&db, 9999).unwrap_err();
+        let msg = format!("{err:#}");
+        assert!(msg.contains("无法下载"), "实际信息：{msg}");
+        assert!(
+            !msg.contains("Query returned no rows"),
+            "绝不能把 rusqlite 内部错误原文透出来：{msg}"
+        );
     }
 }

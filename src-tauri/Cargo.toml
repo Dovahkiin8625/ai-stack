@@ -16,7 +16,6 @@ tauri-build = { version = "2.0", features = [] }
 [dependencies]
 tauri = { version = "2.1", features = [] }
 tauri-plugin-store = "2.1"
-tauri-plugin-window-state = "2.0"
 tauri-plugin-fs = "2.0"
 tauri-plugin-dialog = "2.0"
 tauri-plugin-sql = { version = "2.0", features = ["sqlite"] }
@@ -28,7 +27,7 @@ anyhow = "1"
 thiserror = "1"
 
 # Phase 5: LLM 翻译
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls", "blocking"] }
 
 # Phase 2 新增
 rusqlite = { version = "0.32", features = ["bundled"] }
@@ -44,3 +43,8 @@ quick-xml = { version = "0.36", features = ["serialize"] }
 [dev-dependencies]
 tempfile = "3"
 filetime = "0.2"
+
+# window-state 是桌面独占插件（不支持 Android/iOS）。
+# 放在 target 段里，交叉编译到 Android 时 Cargo 根本不会解析它。
+[target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
+tauri-plugin-window-state = "2.0"

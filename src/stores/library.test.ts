@@ -10,6 +10,22 @@ vi.mock('../lib/library-api', () => ({
   readSubcategoryIndex: vi.fn(async () => ({ title: null, preamble: null, sections: [] })),
 }));
 
+vi.mock('../lib/sync', () => ({
+  syncStatus: vi.fn(async () => ({
+    total: 380,
+    present: 37,
+    totalBytes: 1000,
+    cachedBytes: 100,
+    configured: true,
+  })),
+  syncManifest: vi.fn(async () => ({ files: 380, indexes: 12, skipped: false })),
+  setSyncBaseUrl: vi.fn(async () => undefined),
+  downloadResource: vi.fn(async () => undefined),
+  downloadAll: vi.fn(async () => undefined),
+  onSyncProgress: vi.fn(async () => () => undefined),
+  onSeedProgress: vi.fn(async () => () => undefined),
+}));
+
 import { useLibraryStore } from './library';
 
 describe('library store', () => {
@@ -21,6 +37,9 @@ describe('library store', () => {
       resourceContent: null,
       articlesByPath: {},
       indexByPath: {},
+      syncStatus: null,
+      syncPhase: 'idle',
+      downloadProgress: null,
     });
     // 每个测试把 mock 实现恢复到顶部 mock() 工厂里定义的默认实现。
     // 否则 `mockResolvedValue / mockResolvedValueOnce` 会跨测试污染。
@@ -52,6 +71,24 @@ describe('library store', () => {
       preamble: null,
       sections: [],
     });
+    // 同步 mock 同样 reset + 恢复默认（与 library-api 同等处理）
+    const sync = await import('../lib/sync');
+    vi.mocked(sync.syncStatus).mockReset();
+    vi.mocked(sync.syncManifest).mockReset();
+    vi.mocked(sync.downloadAll).mockReset();
+    vi.mocked(sync.syncStatus).mockResolvedValue({
+      total: 380,
+      present: 37,
+      totalBytes: 1000,
+      cachedBytes: 100,
+      configured: true,
+    });
+    vi.mocked(sync.syncManifest).mockResolvedValue({
+      files: 380,
+      indexes: 12,
+      skipped: false,
+    });
+    vi.mocked(sync.downloadAll).mockResolvedValue(undefined);
   });
 
   it('initial status is idle', () => {
@@ -213,5 +250,127 @@ describe('library store', () => {
     const s = useLibraryStore.getState();
     expect(s.selectedResourceId).toBe(7);
     expect(s.resourceContent?.type).toBe('markdown');
+  });
+
+  // ---- 同步行为（RULING 1 + RULING 2） ----
+  //
+  // RULING 1：syncNow 必须返回 boolean，且 synced 路径内部 scan、skipped 路径不 scan，
+  // 让 caller 的启动序列可以"恰好一次"扫描。
+  //
+  // RULING 2：sync_progress 事件 payload 是 {done, total}，整批失败时多了 error 字段。
+  // 这里不直接测事件（事件 listener 由 UI 层负责），但 store 暴露的 downloadProgress
+  // 必须能诚实地反映后端会送什么 —— 不会因为 store 假设"done==total 即成功"而误导 UI。
+
+  it('syncNow returns true when manifest applied and calls scan(false) internally', async () => {
+    // synced 路径：syncManifest 返回 skipped=false，syncNow 应当：
+    // - 内部调 scan(false) 重建库（避免 caller 再扫一次）
+    // - 内部调 refreshSyncStatus 拿最新 present/total —— "sync 成功"必然伴随
+    //   最新 status 是 syncNow 对所有 caller（启动序列、SyncForm）的共同契约，
+    //   移到这里之后 App.tsx 启动序列可以省掉重复的 IPC
+    // - 翻回 idle 并返回 true
+    const sync = await import('../lib/sync');
+    vi.mocked(sync.syncManifest).mockResolvedValueOnce({
+      files: 380,
+      indexes: 12,
+      skipped: false,
+    });
+    const api = await import('../lib/library-api');
+    vi.mocked(api.scanLibrary).mockClear();
+
+    const synced = await useLibraryStore.getState().syncNow();
+
+    expect(synced).toBe(true);
+    expect(api.scanLibrary).toHaveBeenCalledTimes(1);
+    expect(api.scanLibrary).toHaveBeenCalledWith(false);
+    // 这两条断言同时 pin 住"syncNow 内部 refresh"：任一失败都意味着实现丢了这个调用，
+    // 而去掉内部 refreshSyncStatus 会让 store.syncStatus 在 synced 路径下保持 null，
+    // SyncForm 等 caller 看到的 status 就是 stale 的。这两条必须双绿。
+    expect(sync.syncStatus).toHaveBeenCalledTimes(1);
+    expect(useLibraryStore.getState().syncStatus?.total).toBe(380);
+    expect(useLibraryStore.getState().syncPhase).toBe('idle');
+  });
+
+  it('syncNow returns false when manifest is skipped and does NOT call scan', async () => {
+    // skipped 路径：syncManifest 返回 skipped=true，syncNow 必须：
+    // - **不**调 scan —— 启动序列的 caller 会自己扫
+    // - 返回 false 让 caller 决定后续行为
+    // - 把 syncPhase 翻回 idle（不是 error）
+    const sync = await import('../lib/sync');
+    vi.mocked(sync.syncManifest).mockResolvedValueOnce({
+      files: 0,
+      indexes: 0,
+      skipped: true,
+    });
+    const api = await import('../lib/library-api');
+    vi.mocked(api.scanLibrary).mockClear();
+
+    const synced = await useLibraryStore.getState().syncNow();
+
+    expect(synced).toBe(false);
+    expect(api.scanLibrary).not.toHaveBeenCalled();
+    expect(useLibraryStore.getState().syncPhase).toBe('idle');
+    expect(useLibraryStore.getState().syncStatus).toBeNull();
+  });
+
+  it('syncNow on error returns false and does NOT clobber library status', async () => {
+    // 关键不变量：syncNow 抛错时**只动 syncPhase / error**，不能把冷启动的 `status: 'idle'`
+    // 推到 `status: 'error'`，否则首次启动看到红色空框。
+    const sync = await import('../lib/sync');
+    vi.mocked(sync.syncManifest).mockRejectedValueOnce(new Error('network down'));
+    // 模拟冷启动：status='idle'，categories=[]
+    useLibraryStore.setState({ status: 'idle', categories: [], error: undefined });
+
+    const synced = await useLibraryStore.getState().syncNow();
+
+    expect(synced).toBe(false);
+    expect(useLibraryStore.getState().status).toBe('idle');
+    expect(useLibraryStore.getState().categories).toEqual([]);
+    expect(useLibraryStore.getState().syncPhase).toBe('error');
+    expect(useLibraryStore.getState().error).toContain('network down');
+  });
+
+  it('refreshSyncStatus silently swallows errors and preserves prior syncStatus', async () => {
+    // 状态条是增强信息 —— 拉不到就静默隐藏，不能让 UI 出红条吓用户。
+    // 上次的 syncStatus 保留下来（避免"曾经有数据 → 拉失败 → UI 突然空白"的闪烁）。
+    const sync = await import('../lib/sync');
+    vi.mocked(sync.syncStatus).mockRejectedValueOnce(new Error('IPC boom'));
+    useLibraryStore.setState({
+      syncStatus: { total: 10, present: 5, totalBytes: 100, cachedBytes: 50, configured: true },
+    });
+
+    await useLibraryStore.getState().refreshSyncStatus();
+
+    expect(useLibraryStore.getState().syncStatus).toEqual({
+      total: 10,
+      present: 5,
+      totalBytes: 100,
+      cachedBytes: 50,
+      configured: true,
+    });
+  });
+
+  it('downloadAll sets initial progress to (0, 0) so UI can render the bar before first event', async () => {
+    // 后端 fire-and-forget 后立刻返回 —— 在 sync_progress 第一个事件到来前，
+    // UI 应当已经能渲染进度条占位；(0, 0) 与 null 的区别就是"已开始 vs 还没开始"。
+    await useLibraryStore.getState().downloadAll();
+    const s = useLibraryStore.getState();
+    expect(s.syncPhase).toBe('downloading');
+    expect(s.downloadProgress).toEqual({ done: 0, total: 0 });
+  });
+
+  it('reset clears sync fields so the next session does not inherit stale state', async () => {
+    // 不重置 syncStatus / syncPhase / downloadProgress 的话，登录态/账号切换时旧值会泄漏。
+    useLibraryStore.setState({
+      syncStatus: { total: 10, present: 5, totalBytes: 100, cachedBytes: 50, configured: true },
+      syncPhase: 'downloading',
+      downloadProgress: { done: 3, total: 10 },
+    });
+
+    useLibraryStore.getState().reset();
+
+    const s = useLibraryStore.getState();
+    expect(s.syncStatus).toBeNull();
+    expect(s.syncPhase).toBe('idle');
+    expect(s.downloadProgress).toBeNull();
   });
 });

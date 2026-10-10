@@ -16,7 +16,7 @@ vitest.config.d.ts
 # Rust / Tauri
 src-tauri/target/
 src-tauri/Cargo.lock
-src-tauri/gen/
+src-tauri/gen/schemas/
 
 # 用户数据
 data/
@@ -42,3 +42,7 @@ src-tauri/tests/fixtures/*
 resources/bin/*
 !resources/bin/.gitkeep
 src-tauri/resources/bin/pdfium-windows-x64/pdfium.dll
+
+# Remote manifest publish artifact (regenerate via `npm run gen:manifest`).
+# src-tauri/seed/ is intentionally NOT ignored — the APK seed must build on a clean clone.
+resources/dist/

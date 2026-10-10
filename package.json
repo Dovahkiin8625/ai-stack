@@ -11,7 +11,13 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "gen:fixtures": "node scripts/gen-fixtures.mjs",
-    "gen:samples": "node scripts/gen-samples.mjs"
+    "gen:samples": "node scripts/gen-samples.mjs",
+    "gen:manifest": "node scripts/gen-remote-manifest.mjs",
+    "gen:seed": "node scripts/gen-remote-manifest.mjs --seed",
+    "serve:dist": "node scripts/serve-dist.mjs",
+    "build:windows": "node scripts/build-windows.mjs",
+    "build:android": "node scripts/build-android.mjs",
+    "dev:android": "node scripts/dev-android.mjs"
   },
   "dependencies": {
     "@codemirror/lang-markdown": "^6.3.0",
