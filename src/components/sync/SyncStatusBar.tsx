@@ -50,8 +50,11 @@ export default function SyncStatusBar() {
           error: p.error,
           downloadProgress: null,
         });
-      } else if (p.total > 0 && p.done >= p.total) {
+      } else if (p.done >= p.total) {
         // 正常结束 —— 不假定成功；翻回 idle，去问 sync_status 拿最新 present。
+        // `done >= total` 同时覆盖 (N, N) 的正常完成和 (0, 0) 的"pending 为空"
+        // 终结事件 —— 后者专门解决"全部已缓存时点击同步后 syncPhase 卡在 downloading"
+        // 的 bug（修复见 commands.rs::download_all 的对应注释）。
         useLibraryStore.setState({ syncPhase: 'idle', downloadProgress: null });
         void useLibraryStore.getState().refreshSyncStatus();
       }

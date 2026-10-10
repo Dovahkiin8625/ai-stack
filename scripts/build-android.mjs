@@ -80,7 +80,7 @@ if (!existsSync(debugKeystore)) {
 }
 
 console.log(`\n> apksigner sign ${path.basename(unsignedPath)}`);
-const sign = spawnSync(apksigner, [
+const signArgs = [
   'sign',
   '--ks', debugKeystore,
   '--ks-pass', 'pass:android',
@@ -88,7 +88,18 @@ const sign = spawnSync(apksigner, [
   '--ks-key-alias', 'androiddebugkey',
   '--out', signedPath,
   unsignedPath,
-], { stdio: 'inherit' });
+];
+// On Windows, apksigner is a .bat batch file. Node's spawnSync refuses to
+// execute .bat files directly (returns EINVAL), so invoke via cmd.exe /c.
+// Same flavour of shim workaround the project uses for the Tauri CLI —
+// see the "run the Tauri build" comment above.
+const signCmd = isWin ? 'cmd.exe' : apksigner;
+const signCmdArgs = isWin ? ['/c', apksigner, ...signArgs] : signArgs;
+const sign = spawnSync(signCmd, signCmdArgs, { stdio: 'inherit' });
+if (sign.error) {
+  console.error(`apksigner spawn failed: ${sign.error.message}`);
+  process.exit(1);
+}
 if (sign.status !== 0) process.exit(sign.status ?? 1);
 
 console.log(`\nDone. Signed APK: ${signedPath}`);

@@ -208,6 +208,40 @@ impl Db {
         if has_remote_hash == 0 {
             tx.execute("ALTER TABLE resources ADD COLUMN remote_hash TEXT", [])?;
         }
+        // 极早期（commit 656a55e 之前的 v1）resources 里有 `hash TEXT NOT NULL`，
+        // 同时建了配套索引 `idx_resources_hash`。v2 改名成 remote_hash 时忘了把
+        // 老库里的 hash 列和这个索引都清掉，导致升级后的库 INSERT 不写 hash 时
+        // 直接撞 NOT NULL 约束；或清掉列后任何查询会报
+        // "error in index idx_resources_hash after drop column: no such column: hash"。
+        //
+        // 顺序很关键：
+        // 1. 先 DROP INDEX idx_resources_hash —— 因为 DROP COLUMN 不会自动 drop
+        //    引用被删列的索引，且 DROP COLUMN 之后 SQLite 会拒绝任何针对该表
+        //    的查询（连 DROP INDEX 这种系统表操作都跑不动）。
+        // 2. 再 DROP COLUMN hash —— 此时没有 dangling 索引，干净退出。
+        //
+        // CREATE TABLE IF NOT EXISTS 现在已经不带 hash，新建库不会再触发这段。
+        let has_legacy_idx: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type='index' AND name='idx_resources_hash'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_legacy_idx > 0 {
+            tx.execute("DROP INDEX IF EXISTS idx_resources_hash", [])?;
+        }
+        let has_legacy_hash: i64 = tx
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('resources') WHERE name='hash'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap_or(0);
+        if has_legacy_hash > 0 {
+            tx.execute("ALTER TABLE resources DROP COLUMN hash", [])?;
+        }
         let has_present: i64 = tx
             .query_row(
                 "SELECT COUNT(*) FROM pragma_table_info('resources') WHERE name='present'",
@@ -757,6 +791,104 @@ mod manifest_tests {
         db.conn
             .query_row("SELECT COUNT(*) FROM index_files", [], |r| r.get::<_, i64>(0))
             .unwrap();
+    }
+
+    #[test]
+    fn migrate_drops_legacy_hash_column_from_v1_db() {
+        // 极早期（commit 656a55e 之前）resources 里有 `hash TEXT NOT NULL`。
+        // 改成 remote_hash 时忘了删老列 —— 升级后 upsert_manifest 不写 hash 会撞
+        // NOT NULL 约束（错误信息："NOT NULL constraint failed: resources.hash"）。
+        // migrate() 必须能识别并 DROP COLUMN，否则这条用户的库永远 sync 不上。
+        let tmp = tempfile::tempdir().unwrap();
+        let db_path = tmp.path().join("legacy.db");
+
+        // 手工建一份"老库"：包含 hash 列 + 配套索引 idx_resources_hash，
+        // 但缺 remote_hash / present。这正是 commit 656a55e 前后真实存在的形态。
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "CREATE TABLE resources (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    category_path TEXT NOT NULL,
+                    rel_path TEXT NOT NULL,
+                    type TEXT NOT NULL,
+                    title TEXT NOT NULL,
+                    size_bytes INTEGER NOT NULL,
+                    hash TEXT NOT NULL,
+                    indexed_at TEXT NOT NULL,
+                    page_count INTEGER,
+                    word_count INTEGER,
+                    UNIQUE(category_path, rel_path)
+                 );
+                 CREATE INDEX idx_resources_hash ON resources(hash);
+                 CREATE TABLE categories (
+                    path TEXT PRIMARY KEY,
+                    parent_path TEXT,
+                    title TEXT NOT NULL,
+                    sort_order INTEGER NOT NULL
+                 );
+                 CREATE TABLE notes (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    resource_id INTEGER NOT NULL,
+                    content TEXT NOT NULL,
+                    anchor_text TEXT,
+                    anchor_occurrence INTEGER NOT NULL DEFAULT 0,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    FOREIGN KEY (resource_id) REFERENCES resources(id) ON DELETE CASCADE
+                 );
+                 CREATE TABLE schema_version (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);",
+            )
+            .unwrap();
+        }
+
+        // 走真正的 migrate() —— 这正是用户升级到当前版本时会跑的那一段。
+        let mut db = Db::open(&db_path).unwrap();
+        db.migrate().unwrap();
+
+        // 旧 hash 列必须已经 DROP
+        let has_legacy: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('resources') WHERE name='hash'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_legacy, 0, "legacy `hash` 列必须被 DROP COLUMN 删掉");
+
+        // 配套索引 idx_resources_hash 也必须消失（不然指向不存在的列，
+        // 任何走该索引的查询都会报 "error in index ... no such column: hash"）
+        let has_legacy_idx: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM sqlite_master \
+                 WHERE type='index' AND name='idx_resources_hash'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_legacy_idx, 0, "legacy 索引 idx_resources_hash 必须被清掉");
+
+        // 新列 remote_hash 必须就位
+        let has_remote_hash: i64 = db
+            .conn
+            .query_row(
+                "SELECT COUNT(*) FROM pragma_table_info('resources') WHERE name='remote_hash'",
+                [],
+                |r| r.get(0),
+            )
+            .unwrap();
+        assert_eq!(has_remote_hash, 1);
+
+        // 关键回归：迁移之前 upsert_manifest 会撞 NOT NULL constraint failed: resources.hash；
+        // 迁移之后必须能正常落库。这是用户实际撞到的失败模式，不能只测 schema。
+        db.upsert_manifest(&[ManifestFile {
+            path: "01-基础/回归.md".into(),
+            size: 100,
+            sha256: None,
+        }])
+        .unwrap();
     }
 
     #[test]

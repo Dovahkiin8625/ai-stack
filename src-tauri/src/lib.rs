@@ -67,6 +67,7 @@ pub fn run() {
             commands::translate_text,
             commands::start_ai_annotate,
             commands::start_ai_qa,
+            commands::test_model,
         ])
         .run(tauri::generate_context!())
         .expect("error while running ai-stack application");

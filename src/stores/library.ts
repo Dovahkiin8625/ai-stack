@@ -239,6 +239,13 @@ export const useLibraryStore = create<LibraryState>((set, get) => ({
       // 这一步是 RULING 1 的关键：synced 路径下库由 syncNow 自己重建，
       // caller 不应该再扫一次。
       await get().scan(false);
+      // sync 后 DB 已被改动（manifest upsert + drop missing + scanner 标 present），
+      // 已经缓存的 articlesByPath 是 sync 前的快照，留着已展开过的子分类就显示
+      // 同步前的旧文章数量。scan 自己不清是为了让"本地拖入了新文件"的扫描不会让
+      // 已经渲染的 section 闪回"加载中…"；sync 是用户主动拉的清单，应当看到最新。
+      // indexByPath 与 loadIndex 每次都重读，不清也无所谓，但一并清掉表达"这次同步
+      // 影响了所有 DB-派生内容"。
+      set({ articlesByPath: {}, indexByPath: {} });
       // 内部刷一次 status：syncNow 有两个 caller（启动序列 + SyncForm），
       // 让"sync 成功"必然伴随最新统计是这两个 caller 的共同契约；caller 不必
       // 自己再调 refreshSyncStatus，App.tsx 启动序列因此可以省掉重复的 IPC。

@@ -1,4 +1,5 @@
 import { load, type Store } from '@tauri-apps/plugin-store';
+import { invoke } from '@tauri-apps/api/core';
 
 /**
  * 应用全局 store：阶段 1 只存 API Key；
@@ -87,4 +88,30 @@ export async function saveSettings(s: Partial<AppSettings>): Promise<void> {
   if (s.syncBaseUrl !== undefined)
     await store.set(KEY_SYNC_BASE_URL, s.syncBaseUrl);
   await store.save();
+}
+
+/**
+ * 设置页「测试模型」按钮：向指定 base_url 极小一次 messages 调用，验证
+ * baseUrl + apiKey + model 三件套是否真的可用。
+ *
+ * 与 saveSettings 的关系：测试不读后端 app_config。前端表单字段直传，
+ * 这样"未保存就能测"——节省一次"保存再测发现 key 错"的徒劳往返。
+ *
+ * 失败时后端会把 401/404 body 一起塞进 message，前端直接展示给用户。
+ */
+export interface TestModelResult {
+  model: string;
+  ok: boolean;
+  /** 人类可读的描述：成功给"可用（{ms} ms）"，失败给后端错误原文。 */
+  message: string;
+  /** 请求往返耗时。失败时为 undefined —— UI 不要把"失败了但很快"误判成功。 */
+  latencyMs?: number;
+}
+
+export async function testModel(payload: {
+  baseUrl: string;
+  apiKey: string;
+  model: string;
+}): Promise<TestModelResult> {
+  return invoke<TestModelResult>('test_model', { payload });
 }

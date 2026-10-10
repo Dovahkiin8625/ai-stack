@@ -776,6 +776,15 @@ pub fn download_all(app: AppHandle) -> Result<(), String> {
     }
     let pending = pending_rows(&db).map_err(|e| e.to_string())?;
     if pending.is_empty() {
+        // 没东西可下 —— 但仍然 emit 一个终结事件 {done: 0, total: 0}，
+        // 让前端 listener 翻回 idle。否则前端 downloadAll 已经把 syncPhase 推到
+        // 'downloading'，却永远收不到终结事件 → 按钮一直转圈（详见 SyncStatusBar.tsx
+        // 的 listener 注释）。正常 (N, N) 完成路径靠 crate::sync::download_all 内部
+        // on_progress(0, 0) 之外的累计回调触发，这里是"啥都没下"的对偶路径。
+        let _ = app.emit(
+            "sync_progress",
+            serde_json::json!({"done": 0, "total": 0}),
+        );
         return Ok(());
     }
     let fetcher = http_fetcher
@@ -1502,6 +1511,28 @@ pub struct TranslatePayload {
     pub api_key: String,
 }
 
+/// 设置页「测试模型」按钮的入参。前端表单尚未保存生效时也能测试，
+/// 所以 base_url / api_key 由表单字段直传 —— 不依赖后端 app_config。
+#[derive(Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestModelPayload {
+    pub base_url: String,
+    pub api_key: String,
+    pub model: String,
+}
+
+/// 单模型测试结果。前端按 model 字段匹配到具体输入框，渲染 ✓/✗。
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct TestModelResult {
+    pub model: String,
+    pub ok: bool,
+    /// 人类可读的状态描述（成功时长 / 失败原因）。失败时给前端直接展示。
+    pub message: String,
+    /// 请求往返耗时（毫秒）。失败时为 None —— 不让 UI 误把"快了 4 秒"当成功。
+    pub latency_ms: Option<u64>,
+}
+
 #[derive(Serialize)]
 struct MessagesRequest<'a> {
     model: &'a str,
@@ -1629,6 +1660,98 @@ pub async fn translate_text(payload: TranslatePayload) -> Result<String, String>
     Ok(result)
 }
 
+/// 设置页"测试模型"按钮：向目标 base_url 极小一次 `/v1/messages` 调用，
+/// 仅用来验证 baseUrl + apiKey + model 三个字段组合是否真的能用。
+///
+/// 设计要点：
+/// - 不带 thinking —— 测试走的是"纯生成"路径，与 translate 实际使用形态一致；
+///   thinking 模型仅在 `start_ai_qa` 里走另一条路，单独测会出现"测试通过但讲解调用失败"
+///   的误导，所以测试里也不启用。
+/// - `max_tokens: 1` + 内容 "ping" —— 1 个 token 就够，最小化开销；model_not_found / 401 这类
+///   配置错误在 HTTP 头响应阶段就抛出，不需要真生成内容。
+/// - 不走 TRANSLATION_CACHE —— 测试不应该命中任何缓存，结果必须反映真实连通性。
+/// - 失败把后端 body（401 错通常是 invalid x-api-key、404 是 not_found_model）原样回传，
+///   前端把它放在输入框下方提示，用户能直接看出"key 错了"还是"模型名写错"。
+#[tauri::command]
+pub async fn test_model(payload: TestModelPayload) -> Result<TestModelResult, String> {
+    let api_key = payload.api_key.trim().to_string();
+    if api_key.is_empty() {
+        return Err("未配置 API Key，请在设置页填写".to_string());
+    }
+    let model = payload.model.trim().to_string();
+    if model.is_empty() {
+        return Err("未填写模型 ID".to_string());
+    }
+    let base = payload.base_url.trim_end_matches('/').to_string();
+    if base.is_empty() {
+        return Err("未配置 API Base URL".to_string());
+    }
+    let url = format!("{}/v1/messages", base);
+
+    let req = MessagesRequest {
+        model: &model,
+        max_tokens: 1,
+        messages: vec![AnthropicMessage {
+            role: "user",
+            content: "ping",
+        }],
+    };
+
+    let started = std::time::Instant::now();
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(30))
+        .build()
+        .map_err(|e| format!("http client: {e}"))?;
+
+    let res = client
+        .post(&url)
+        .header("x-api-key", &api_key)
+        .header("anthropic-version", "2023-06-01")
+        .header("content-type", "application/json")
+        .json(&req)
+        .send()
+        .await
+        .map_err(|e| format!("请求失败：{e}（请检查网络与 baseUrl）"))?;
+
+    let latency_ms = started.elapsed().as_millis() as u64;
+    let status = res.status();
+    if !status.is_success() {
+        let body = res.text().await.unwrap_or_default();
+        return Ok(TestModelResult {
+            model,
+            ok: false,
+            // 把 body 一起回给前端 —— 401 / 404 在 Anthropic 兼容网关里通常包含
+            // 具体错误原因（"invalid x-api-key"、"not_found_model"等），用户能直接定位
+            // 是 key 错、模型名错、还是服务端路由错。body 太长就截断。
+            message: format!("HTTP {}：{}", status.as_u16(), truncate(&body, 200)),
+            latency_ms: None,
+        });
+    }
+
+    // 200 即可视为"可用" —— 不解析 content 数组，省一次 JSON 解码路径；
+    // 模型能用就一定能产出 1 token，哪怕只是空字符串也 ok。
+    Ok(TestModelResult {
+        model,
+        ok: true,
+        message: format!("可用（{} ms）", latency_ms),
+        latency_ms: Some(latency_ms),
+    })
+}
+
+/// 工具：把后端错误 body 截断到 N 字符避免前端 alert 被一行几百字撑爆。
+fn truncate(s: &str, max: usize) -> String {
+    if s.len() <= max {
+        s.to_string()
+    } else {
+        // 按字符边界截，避免切到 UTF-8 中间。
+        let mut end = max;
+        while end > 0 && !s.is_char_boundary(end) {
+            end -= 1;
+        }
+        format!("{}…", &s[..end])
+    }
+}
+
 /// 在 setup 阶段调用，创建 AppState 并注册到 Tauri。
 pub fn build_state(app: &AppHandle) -> AppState {
     let db_path = resolve_db_path(app);
@@ -1667,7 +1790,8 @@ pub fn build_state(app: &AppHandle) -> AppState {
 #[cfg(test)]
 mod tests {
     use super::{
-        build_qa_prompt, model_supports_thinking, AiChunkPayload, AiErrorPayload, AppState,
+        build_qa_prompt, model_supports_thinking, truncate, AiChunkPayload, AiErrorPayload,
+        AppState,
     };
     use crate::db::Db;
     use crate::sync::{Manifest, ManifestFile};
@@ -1925,5 +2049,29 @@ mod tests {
             !msg.contains("Query returned no rows"),
             "绝不能把 rusqlite 内部错误原文透出来：{msg}"
         );
+    }
+
+    #[test]
+    fn truncate_short_strings_pass_through_unchanged() {
+        // 短字符串不应被加省略号 —— 让 "HTTP 401：invalid x-api-key"
+        // 这种短错误完整保留，方便用户直接看出哪步错。
+        assert_eq!(truncate("hello", 10), "hello");
+        // 边界：长度 == max 时也不截断
+        assert_eq!(truncate("hello world", 11), "hello world");
+    }
+
+    #[test]
+    fn truncate_long_strings_add_ellipsis_without_splitting_utf8() {
+        // 关键测试：截断点不能切到 UTF-8 多字节字符中间，否则前端看到的 error
+        // 会带乱码尾巴，比"信息太长"还要糟糕。
+        let s = "你好世界hello world"; // 12 chars, 18 bytes
+        let out = truncate(s, 10);
+        // 截到 byte 10 之前最近的合法边界 + "…" —— 4 个汉字每个 3 字节，
+        // byte 9 是「世」末尾的合法边界，所以输出"你好世界" + "…"
+        assert!(out.ends_with('…'), "should end with ellipsis: {out:?}");
+        assert!(out.is_char_boundary(out.len() - '…'.len_utf8()),
+            "ellipsis itself must sit on a char boundary: {out:?}");
+        // ASCII-only 长字符串也能正确截断
+        assert_eq!(truncate("abcdefghijklmnop", 5), "abcde…");
     }
 }

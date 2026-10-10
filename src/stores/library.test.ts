@@ -312,6 +312,37 @@ describe('library store', () => {
     expect(useLibraryStore.getState().syncStatus).toBeNull();
   });
 
+  it('syncNow invalidates articlesByPath cache after manifest is applied', async () => {
+    // Bug: 同步后 DB 已被改动（manifest upsert + drop missing + scanner 标 present），
+    // 但 articlesByPath 是 sync 前的快照，留着已展开过的子分类就显示陈旧文章数量。
+    // 用户报告 "01 Foundations 下的文章没有刷新，但其他下边的都出来了" —— 根因正是
+    // 同步前已展开的子分类命中缓存，sync 后没刷新。
+    //
+    // Fix 范围：syncNow 完成后清缓存，让 Sidebar / ArticleIndexView 的 loadArticles
+    // effect 重新拉。注意 scan() 自身不清（让本地拖入新文件的扫描不闪"加载中…"）；
+    // sync 是用户主动拉的清单，期望前端与 DB 一致。
+    useLibraryStore.setState({
+      articlesByPath: {
+        // 模拟"sync 前用户已展开 01-基础 子分类"留下的陈旧缓存
+        '01-基础/已缓存子分类': [
+          { id: 1, categoryPath: '01-基础/已缓存子分类', relPath: 'old.md', type: 'markdown', title: 'Old', sizeBytes: 0, indexedAt: '', pageCount: null, wordCount: null, present: true },
+        ],
+      },
+    });
+    const sync = await import('../lib/sync');
+    vi.mocked(sync.syncManifest).mockResolvedValueOnce({
+      files: 380,
+      indexes: 12,
+      skipped: false,
+    });
+
+    const synced = await useLibraryStore.getState().syncNow();
+
+    expect(synced).toBe(true);
+    // sync 完成后缓存必须清空：DB 已变，缓存内容是 sync 前的快照，留着就是错的。
+    expect(useLibraryStore.getState().articlesByPath).toEqual({});
+  });
+
   it('syncNow on error returns false and does NOT clobber library status', async () => {
     // 关键不变量：syncNow 抛错时**只动 syncPhase / error**，不能把冷启动的 `status: 'idle'`
     // 推到 `status: 'error'`，否则首次启动看到红色空框。

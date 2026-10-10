@@ -3,9 +3,12 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import SyncStatusBar from './SyncStatusBar';
 import { useLibraryStore } from '../../stores/library';
+import type { SyncProgress } from '../../types';
 
 // onSyncProgress 内部 listen() 来自 @tauri-apps/api/event —— 在 jsdom 下没有真事件系统，
 // stub 出一个立刻 resolve 的 unlisten 函数，组件挂载时不会炸。
+// 但测试 listener 行为时，需要捕获注册进去的 cb —— 用 mockImplementationOnce 覆盖。
+import { listen } from '@tauri-apps/api/event';
 vi.mock('@tauri-apps/api/event', () => ({
   listen: vi.fn(async () => () => undefined),
 }));
@@ -61,5 +64,42 @@ describe('SyncStatusBar', () => {
     expect(screen.getByText(/12 \/ 343/)).toBeTruthy();
     // 下载中不应再渲染「下载全部」按钮（RULING 2：disable 而不是装饰 暂停）
     expect(screen.queryByRole('button', { name: '下载全部' })).toBeNull();
+  });
+
+  it('sync_progress {done:0,total:0} 终结事件把 syncPhase 翻回 idle（pending 为空场景）', async () => {
+    // Bug：用户拉完清单后所有文件已缓存 → pending=0 → 后端早返回不 emit 任何事件
+    // → syncPhase 永远停在 'downloading' → 按钮一直转圈。
+    // 修复路径：后端改为 emit {done:0,total:0} 终结事件 + listener 把这种事件
+    // 当成"翻回 idle"的信号（与 (done===total) 的正常完成同构）。
+    //
+    // 这里测的是 listener 这一侧：拿到 (0,0) 必须翻 idle 并 refreshSyncStatus。
+    let registeredListener: ((e: { payload: SyncProgress }) => void) | undefined;
+    vi.mocked(listen).mockImplementationOnce(async (_event, cb) => {
+      registeredListener = cb as (e: { payload: SyncProgress }) => void;
+      return () => undefined;
+    });
+
+    // 模拟「点击开始同步、syncPhase 卡在 downloading 但 downloadProgress 还是 (0,0)」
+    // —— 这是 bug 在 store 上的指纹。SyncStatusBar 不渲染（present===total）也无所谓，
+    // listener 已经在 useEffect 里注册好。
+    useLibraryStore.setState({
+      syncStatus: { total: 380, present: 380, totalBytes: 1000, cachedBytes: 1000, configured: true },
+      syncPhase: 'downloading',
+      downloadProgress: { done: 0, total: 0 },
+    });
+
+    render(<SyncStatusBar />);
+    // 等 useEffect 里的 listen() resolve（这里是异步）
+    await vi.waitFor(() => expect(registeredListener).toBeDefined());
+
+    // 模拟后端 emit 的"没东西可下"终结事件
+    registeredListener!({ payload: { done: 0, total: 0 } });
+
+    // 应当翻回 idle 并清掉 downloadProgress（让 SyncForm 的 showProgress 重新为 false）
+    await vi.waitFor(() => {
+      const s = useLibraryStore.getState();
+      expect(s.syncPhase).toBe('idle');
+      expect(s.downloadProgress).toBeNull();
+    });
   });
 });
