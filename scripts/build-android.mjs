@@ -16,6 +16,7 @@
 //   node scripts/build-android.mjs --debug    # debug build (no signing)
 import { spawnSync } from 'node:child_process';
 import { existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
 import path from 'node:path';
 import os from 'node:os';
 
@@ -32,15 +33,21 @@ const debugKeystore = process.env.HOME
   : path.join(os.homedir(), '.android', 'debug.keystore');
 
 // ---- run the Tauri build --------------------------------------------------
-const debug = process.argv.includes('--debug');
-const tauriArgs = ['--no-install', 'tauri', 'android', 'build',
-  '--apk',
-  '--target', 'aarch64',
-];
-if (debug) tauriArgs.splice(3, 0, '--debug');
+// Invoke the Tauri CLI via node directly. Spawning `npx` fails on Windows
+// because Node refuses to execute `.cmd` shims without `shell: true`.
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const cliPath = path.join(__dirname, '..', 'node_modules', '@tauri-apps', 'cli', 'tauri.js');
 
-console.log(`> npx ${tauriArgs.join(' ')}`);
-const build = spawnSync('npx', tauriArgs, { stdio: 'inherit' });
+const debug = process.argv.includes('--debug');
+const tauriArgs = ['android', 'build', '--apk', '--target', 'aarch64'];
+if (debug) tauriArgs.splice(2, 0, '--debug');
+
+console.log(`> node ${path.relative(process.cwd(), cliPath)} ${tauriArgs.join(' ')}`);
+const build = spawnSync(process.execPath, [cliPath, ...tauriArgs], { stdio: 'inherit' });
+if (build.error) {
+  console.error(`spawn failed: ${build.error.message}`);
+  process.exit(1);
+}
 if (build.status !== 0) process.exit(build.status ?? 1);
 
 // ---- sign the unsigned APK (release builds only) -------------------------
